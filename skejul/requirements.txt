@@ -1,0 +1,14 @@
+# Telegram Bot kutubxonasi
+aiogram==3.4.1
+
+# Asinxron SQLite
+aiosqlite==0.19.0
+
+# Vaqt rejalashtirish
+APScheduler==3.10.4
+
+# Environment o'zgaruvchilar
+python-dotenv==1.0.0
+
+# Timezone (Koreya vaqti uchun)
+pytz==2024.1
