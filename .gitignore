@@ -1,0 +1,79 @@
+# ================================
+#  PYTHON / TELEGRAM BOT PROJECTS
+# ================================
+
+# --- Virtual Environments ---
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+myenv/
+my_env/
+
+# --- Python bytecode ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdc
+
+# --- Build / packaging ---
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Logs ---
+*.log
+logs/
+log/
+
+# --- Caches ---
+*.sqlite3
+*.db
+*.sqlite
+*.db-shm
+*.db-wal
+
+.cache/
+*.cache
+.cache/*
+pip-wheel-metadata/
+pip-cache/
+pip-log.txt
+
+# --- Jupyter (senga kerak bo'lmasa ham qo'yib qo'ydim) ---
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# --- Environment variables ---
+# .env
+# .env.*
+# *.env
+
+# --- VSCode ---
+.vscode/
+.history/
+
+# --- PyCharm / JetBrains ---
+.idea/
+*.iml
+
+# --- System files ---
+.DS_Store
+Thumbs.db
+
+# --- Misc ---
+*.bak
+*~
+tmp/
+temp/
+
+# --- Backups (Zaxira nusxalar) ---
+# Kodda .backup fayllar yaratish qismi bor, bularni ham yashirish kerak
+backups/
+*.backup
+*.bak
+backup_*.json
