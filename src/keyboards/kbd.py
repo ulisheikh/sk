@@ -16,9 +16,41 @@ def main_reply_keyboard():
 # 1. Asosiy Inline menyu
 def main_menu_inline():
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="📅 내 근무표", callback_data="view_report"))
+    builder.row(InlineKeyboardButton(text="📊 내 근무표", callback_data="my_workplaces"))
+    builder.row(InlineKeyboardButton(text="📅 월별 전체 보기", callback_data="monthly_overview"))
+    return builder.as_markup()
+
+# 1a. 내 근무표 ko'rsatilgandan keyin
+def report_actions_inline():
+    builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="✏️ 근무표 수정", callback_data="edit_logs"))
     builder.row(InlineKeyboardButton(text="⚙️ 설정", callback_data="settings"))
+    builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
+    return builder.as_markup()
+
+# 1b. Oylarni tanlash (월별 전체 보기)
+def select_any_month_inline():
+    from datetime import datetime
+    builder = InlineKeyboardBuilder()
+    now = datetime.now()
+    
+    # Oxirgi 12 oy
+    for i in range(12):
+        month_date = datetime(now.year, now.month, 1) - timedelta(days=30*i)
+        month_text = month_date.strftime("%Y년 %m월")
+        builder.button(
+            text=month_text,
+            callback_data=f"viewmonth_{month_date.year}_{month_date.month}"
+        )
+    
+    builder.adjust(3)
+    builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
+    return builder.as_markup()
+
+# 1c. Oydan orqaga
+def back_to_monthly_inline():
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="⬅️ 뒤로", callback_data="monthly_overview"))
     return builder.as_markup()
 
 # 2. Sozlamalar menyusi
@@ -160,4 +192,72 @@ def confirm_inline(action, value=None):
         InlineKeyboardButton(text="❌ 아니오", callback_data="main_menu")
     )
     
+    return builder.as_markup()
+
+# Faqat +ADD tugmasi
+def add_workplace_only_inline():
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="➕ 직장 추가", callback_data="add_new_workplace"))
+    builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
+    return builder.as_markup()
+
+# Ishxonalar ro'yxati (내 근무표 uchun)
+def workplaces_list_inline(workplaces):
+    builder = InlineKeyboardBuilder()
+    for wp_id, wp_name in workplaces:
+        builder.row(InlineKeyboardButton(
+            text=f"🏢 {wp_name}",
+            callback_data=f"select_workplace_{wp_id}"
+        ))
+    builder.row(InlineKeyboardButton(text="➕ 직장 추가", callback_data="add_new_workplace"))
+    builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
+    return builder.as_markup()
+
+# Ishxonalar ro'yxati (월별 uchun)
+def workplaces_for_monthly_inline(workplaces):
+    builder = InlineKeyboardBuilder()
+    for wp_id, wp_name in workplaces:
+        builder.row(InlineKeyboardButton(
+            text=f"🏢 {wp_name}",
+            callback_data=f"monthly_wp_{wp_id}"
+        ))
+    builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
+    return builder.as_markup()
+
+# Ishxona ma'lumoti ko'rsatilgandan keyin
+def workplace_actions_inline(workplace_id):
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="✏️ 근무표 수정", callback_data="edit_logs"))
+    builder.row(InlineKeyboardButton(text="⚙️ 설정", callback_data="settings"))
+    builder.row(InlineKeyboardButton(text="⬅️ 뒤로", callback_data="my_workplaces"))
+    return builder.as_markup()
+
+# Oylarni tanlash (ishxona bo'yicha)
+def select_month_inline(workplace_id):
+    from datetime import datetime, timedelta
+    builder = InlineKeyboardBuilder()
+    now = datetime.now()
+    
+    for i in range(12):
+        month_date = datetime(now.year, now.month, 1) - timedelta(days=30*i)
+        month_text = month_date.strftime("%Y년 %m월")
+        builder.button(
+            text=month_text,
+            callback_data=f"viewmonth_{workplace_id}_{month_date.year}_{month_date.month}"
+        )
+    
+    builder.adjust(3)
+    builder.row(InlineKeyboardButton(text="⬅️ 뒤로", callback_data=f"monthly_wp_{workplace_id}"))
+    return builder.as_markup()
+
+# Oydan orqaga (ishxona tanlashga)
+def back_to_month_select_inline(workplace_id):
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="⬅️ 뒤로", callback_data=f"monthly_wp_{workplace_id}"))
+    return builder.as_markup()
+
+# Faqat main menu
+def back_to_main_inline():
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
     return builder.as_markup()

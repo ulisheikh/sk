@@ -37,6 +37,22 @@ async def init_db():
             )
         """)
         
+        # workplace_id ustunini qo'shish (agar yo'q bo'lsa)
+        try:
+            await conn.execute("ALTER TABLE work_logs ADD COLUMN workplace_id INTEGER DEFAULT 1")
+        except:
+            pass  # Ustun allaqachon mavjud
+        
+        # Workplaces jadvali
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS workplaces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         # Admin actions log (audit)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS admin_actions (
@@ -207,4 +223,55 @@ async def update_work_days(user_id, work_days_str):
             "UPDATE users SET work_days = ? WHERE user_id = ?",
             (work_days_str, user_id)
         )
+        await db.commit()
+
+async def add_workplace(user_id, name):
+    """Yangi ishxona qo'shish"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO workplaces (user_id, name) VALUES (?, ?)",
+            (user_id, name)
+        )
+        await db.commit()
+        async with db.execute("SELECT last_insert_rowid()") as cursor:
+            result = await cursor.fetchone()
+            return result[0]
+
+async def get_user_workplaces(user_id):
+    """Foydalanuvchining barcha ishxonalari"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, name FROM workplaces WHERE user_id = ? ORDER BY id",
+            (user_id,)
+        ) as cursor:
+            return await cursor.fetchall()
+
+async def get_workplace_name(workplace_id):
+    """Ishxona nomini olish"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT name FROM workplaces WHERE id = ?",
+            (workplace_id,)
+        ) as cursor:
+            result = await cursor.fetchone()
+            return result[0] if result else "알 수 없음"
+
+async def get_monthly_logs_by_workplace(user_id, workplace_id, year, month):
+    """Ishxona bo'yicha oylik ma'lumotlar"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT work_date, hours FROM work_logs
+            WHERE user_id = ? AND workplace_id = ?
+            AND work_date LIKE ?
+            ORDER BY work_date
+        """, (user_id, workplace_id, f"{year}-{month:02d}%")) as cursor:
+            return await cursor.fetchall()
+
+async def save_work_log_with_workplace(user_id, workplace_id, work_date, hours):
+    """Ishxona bilan birga log saqlash"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT OR REPLACE INTO work_logs (user_id, workplace_id, work_date, hours)
+            VALUES (?, ?, ?, ?)
+        """, (user_id, workplace_id, work_date, hours))
         await db.commit()

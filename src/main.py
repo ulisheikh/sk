@@ -12,8 +12,18 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 from src.utils.config import BOT_TOKEN
 from src.handlers import hd
 from src.handlers import hd_admin
+from src.handlers import hd_workplace
 from src.database import db
 import src.keyboards.kbd as kbd
+from aiogram.types import BotCommand
+
+async def set_bot_commands(bot: Bot):
+    """Chap menyu commandalar"""
+    commands = [
+        BotCommand(command="start", description="🏠 메인 메뉴"),
+        BotCommand(command="info", description="ℹ️ 내 정보")
+    ]
+    await bot.set_my_commands(commands)
 
 async def send_morning_reminder(bot: Bot):
     """Har kuni 05:00 da inline tugmalar bilan so'rov yuborish"""
@@ -44,9 +54,14 @@ async def main():
     
     # Botni sozlash
     bot = Bot(token=BOT_TOKEN)
+    
+    # Chap menu commandalar
+    await set_bot_commands(bot)
+    
     dp = Dispatcher()
     dp.include_router(hd_admin.admin_router)  # Admin router birinchi
-    dp.include_router(hd.router)  # Keyin oddiy router
+    dp.include_router(hd_workplace.router)  # Yangi workplace router
+    dp.include_router(hd.router)  # Eski router (fallback)
 
     # Scheduler (Koreya vaqti bilan 05:00)
     scheduler = AsyncIOScheduler(timezone="Asia/Seoul")

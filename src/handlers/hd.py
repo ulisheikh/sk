@@ -61,6 +61,7 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
 # --- SOZLAMALAR MENYUSI ---
 @router.callback_query(F.data == "settings")
 async def show_settings(callback: CallbackQuery):
+    await callback.answer()
     user_id = callback.from_user.id
     name, hourly_rate, tax_rate, work_days = await db.get_user_full_info(user_id)
     
@@ -77,6 +78,7 @@ async def show_settings(callback: CallbackQuery):
 # --- SOATLIK TO'LOV ---
 @router.callback_query(F.data == "edit_rate")
 async def edit_rate_start(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     await callback.message.answer("💰 새로운 시급을 입력하세요 (예: 12500):")
     await state.set_state(Form.edit_rate)
 
@@ -104,6 +106,7 @@ async def process_edit_rate(message: Message, state: FSMContext):
 # --- SOLIQ ---
 @router.callback_query(F.data == "edit_tax")
 async def edit_tax_start(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     await callback.message.answer("📉 새로운 세금율을 입력하세요 (예: 3.3):")
     await state.set_state(Form.edit_tax)
 
@@ -131,6 +134,7 @@ async def process_edit_tax(message: Message, state: FSMContext):
 # --- ISH KUNLARI ---
 @router.callback_query(F.data == "edit_workdays")
 async def edit_workdays_start(callback: CallbackQuery):
+    await callback.answer()
     user_id = callback.from_user.id
     name, hourly_rate, tax_rate, work_days = await db.get_user_full_info(user_id)
     selected_days = work_days.split(',') if work_days else []
@@ -142,6 +146,7 @@ async def edit_workdays_start(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("toggle_day_"))
 async def toggle_workday(callback: CallbackQuery):
+    await callback.answer()
     user_id = callback.from_user.id
     day = callback.data.split("_")[-1]
     
@@ -178,6 +183,7 @@ async def save_workdays(callback: CallbackQuery):
 # --- KUNLIK TAHRIRLASH (KALENDAR) ---
 @router.callback_query(F.data == "edit_logs")
 async def show_calendar(callback: CallbackQuery):
+    await callback.answer()
     """Kalendar - ishlangan kunlar bilan"""
     user_id = callback.from_user.id
     now = datetime.now()
@@ -264,6 +270,7 @@ async def create_user_calendar_with_work(work_data, now):
 
 @router.callback_query(F.data.startswith("edit_day_"))
 async def select_day(callback: CallbackQuery):
+    await callback.answer()
     day = callback.data.split("_")[-1]
     
     # Hafta kunini aniqlash
@@ -323,6 +330,7 @@ async def save_hours(callback: CallbackQuery):
 # --- QO'LDA KIRITISH ---
 @router.callback_query(F.data.startswith("manual_edit_"))
 async def manual_input_start(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     day = callback.data.split("_")[-1]
     await state.update_data(editing_day=day)
     await callback.message.answer(f"⌨️ {day}일 근무 시간을 입력해주세요 (예: 9.5):")
@@ -361,6 +369,7 @@ async def process_manual_input(message: Message, state: FSMContext):
 # --- KUNLIK HISOBOT (HAFTA KUNI BILAN) ---
 @router.callback_query(F.data == "view_report")
 async def view_report(callback: CallbackQuery):
+    await callback.answer()
     user_id = callback.from_user.id
     now = datetime.now()
     current_month = now.strftime('%Y-%m')
