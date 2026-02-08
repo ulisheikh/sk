@@ -16,6 +16,20 @@ class Form(StatesGroup):
     edit_rate = State()
     edit_tax = State()
     daily_manual_input = State()
+    edit_manual_workplace_day = State()
+
+# ===== HELPER FUNKSIYA - XATOLARNI OLDINI OLISH =====
+async def safe_edit_or_answer(callback, text, reply_markup=None, parse_mode=None):
+    """Xabarni tahrirlash yoki yangi yuborish (rasm xatoligini oldini oladi)"""
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except:
+        # Agar xabar rasm bo'lsa yoki boshqa xato bo'lsa
+        try:
+            await callback.message.delete()
+        except:
+            pass
+        await callback.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
 # Hafta kunlarini olish funksiyasi
 def get_weekday_korean(date_obj):
@@ -51,11 +65,12 @@ async def cmd_start(message: Message):
 
 @router.callback_query(F.data == "main_menu")
 async def back_to_main(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     await state.clear()
-    await callback.message.edit_text(
-        "원하시는 메뉴를 선택해주세요:", 
-        reply_markup=kbd.main_menu_inline(),
-        parse_mode=None
+    await safe_edit_or_answer(
+        callback,
+        "원하시는 메뉴를 선택해주세요:",
+        reply_markup=kbd.main_menu_inline()
     )
 
 # --- SOZLAMALAR MENYUSI ---
@@ -73,7 +88,7 @@ async def show_settings(callback: CallbackQuery):
 
 수정할 항목을 선택하세요:
 """
-    await callback.message.edit_text(text, reply_markup=kbd.settings_inline(), parse_mode=None)
+    await safe_edit_or_answer(callback, text, reply_markup=kbd.settings_inline())
 
 # --- SOATLIK TO'LOV ---
 @router.callback_query(F.data == "edit_rate")
@@ -139,7 +154,8 @@ async def edit_workdays_start(callback: CallbackQuery):
     name, hourly_rate, tax_rate, work_days = await db.get_user_full_info(user_id)
     selected_days = work_days.split(',') if work_days else []
     
-    await callback.message.edit_text(
+    await safe_edit_or_answer(
+        callback,
         "📅 근무하는 요일을 선택하세요:",
         reply_markup=kbd.weekdays_inline(selected_days)
     )
@@ -167,47 +183,88 @@ async def toggle_workday(callback: CallbackQuery):
         )
         await conn.commit()
     
-    await callback.message.edit_reply_markup(
-        reply_markup=kbd.weekdays_inline(selected_days)
-    )
-    await callback.answer()
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=kbd.weekdays_inline(selected_days)
+        )
+    except:
+        pass
 
 @router.callback_query(F.data == "save_settings")
 async def save_workdays(callback: CallbackQuery):
     await callback.answer("✅ 저장되었습니다!")
-    await callback.message.edit_text(
+    await safe_edit_or_answer(
+        callback,
         "원하시는 메뉴를 선택해주세요:",
         reply_markup=kbd.main_menu_inline()
     )
 
-# --- KUNLIK TAHRIRLASH (KALENDAR) ---
+# --- KUNLIK TAHRIRLASH ---
 @router.callback_query(F.data == "edit_logs")
-async def show_calendar(callback: CallbackQuery):
+async def show_edit_logs(callback: CallbackQuery):
+    """Ishxonalarni ko'rsatish yoki to'g'ridan kalendar"""
     await callback.answer()
-    """Kalendar - ishlangan kunlar bilan"""
     user_id = callback.from_user.id
+    
+    # Foydalanuvchining barcha ishxonalarini olish
+    workplaces = await db.get_user_workplaces(user_id)
+    
+    if not workplaces:
+        # Ishxona yo'q - xabar ko'rsatish
+        await safe_edit_or_answer(
+            callback,
+            "🏢 직장이 없습니다.\n먼저 직장을 추가하세요:",
+            reply_markup=kbd.add_workplace_only_inline()
+        )
+        return
+    
+    if len(workplaces) == 1:
+        # Bitta ishxona - to'g'ridan kalendar ko'rsatish
+        workplace_id = workplaces[0][0]
+        await show_calendar_for_workplace(callback, workplace_id)
+        return
+    
+    # Bir nechta ishxona bo'lsa, tanlash uchun ro'yxat ko'rsatish
+    await safe_edit_or_answer(
+        callback,
+        "🏢 수정할 직장을 선택하세요:",
+        reply_markup=kbd.workplaces_for_edit_inline(workplaces)
+    )
+
+@router.callback_query(F.data.startswith("edit_logs_"))
+async def show_calendar_for_workplace(callback: CallbackQuery, workplace_id: int = None):
+    """Tanlangan ishxona uchun kalendar ko'rsatish"""
+    await callback.answer()
+    
+    # Agar workplace_id parameter orqali kelmasa, callback datadan olish
+    if workplace_id is None:
+        workplace_id = int(callback.data.split("_")[-1])
+    
+    user_id = callback.from_user.id
+    workplace_name = await db.get_workplace_name(workplace_id)
     now = datetime.now()
     
-    # Ishlangan kunlarni olish
+    # Ishlangan kunlarni olish (shu ishxona uchun)
     current_month = now.strftime('%Y-%m')
     async with aiosqlite.connect(db.DB_PATH) as conn:
         async with conn.execute(
-            "SELECT work_date, hours FROM work_logs WHERE user_id = ? AND work_date LIKE ?",
-            (user_id, f"{current_month}%")
+            """SELECT work_date, hours FROM work_logs 
+               WHERE user_id = ? AND workplace_id = ? AND work_date LIKE ?""",
+            (user_id, workplace_id, f"{current_month}%")
         ) as cursor:
             work_data = await cursor.fetchall()
     
     # Kalendar yaratish
-    calendar_markup = await create_user_calendar_with_work(work_data, now)
+    calendar_markup = await create_user_calendar_with_work(work_data, now, workplace_id)
     
-    await callback.message.edit_text(
-        f"📅 {now.year}년 {now.month}월\n수정할 날짜를 선택하세요:\n\n• = 근무 기록됨 | 🏖 = 휴무",
-        reply_markup=calendar_markup,
-        parse_mode=None
+    await safe_edit_or_answer(
+        callback,
+        f"🏢 {workplace_name}\n📅 {now.year}년 {now.month}월\n수정할 날짜를 선택하세요:\n\n• = 근무 기록됨 | 🏖 = 휴무",
+        reply_markup=calendar_markup
     )
 
-async def create_user_calendar_with_work(work_data, now):
-    """Foydalanuvchi uchun ishlangan kunlar bilan kalendar"""
+async def create_user_calendar_with_work(work_data, now, workplace_id):
+    """Ishxona ID bilan kalendar yaratish"""
     builder = InlineKeyboardBuilder()
     
     year = now.year
@@ -240,106 +297,94 @@ async def create_user_calendar_with_work(work_data, now):
     # Kunlarni qo'shish
     current_day = now.day
     for day in range(1, days_in_month + 1):
-        if day == current_day:
-            text = f"📍{day}"
-        elif day < current_day and day in worked_days:
-            # Ishlangan yoki dam olgan
-            if worked_days[day] == 0:
-                text = f"🏖{day}"  # Dam olgan
+        if day in worked_days:
+            hours = worked_days[day]
+            if hours == 0:
+                text = f"🏖{day}"
             else:
-                text = f"•{day}"   # Ishlagan
-        elif day < current_day:
-            # Hech narsa yozilmagan
-            text = str(day)
+                text = f"•{day}"
+        elif day == current_day:
+            text = f"🔹{day}"
         else:
             text = str(day)
         
         buttons.append(InlineKeyboardButton(
             text=text, 
-            callback_data=f"edit_day_{day}"
+            callback_data=f"edit_day_{workplace_id}_{day}"
         ))
-    
+        
     # 7 tadan guruplash
     for i in range(0, len(buttons), 7):
         builder.row(*buttons[i:i+7])
     
-    # Orqaga
-    builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
+    # Orqaga qaytish
+    builder.row(InlineKeyboardButton(text="⬅️ 뒤로", callback_data="main_menu"))
     
     return builder.as_markup()
 
+# --- KUNNI TAHRIRLASH ---
 @router.callback_query(F.data.startswith("edit_day_"))
-async def select_day(callback: CallbackQuery):
+async def edit_day(callback: CallbackQuery):
+    """Kunni tahrirlash - soatlarni tanlash"""
     await callback.answer()
-    day = callback.data.split("_")[-1]
     
-    # Hafta kunini aniqlash
-    now = datetime.now()
-    selected_date = datetime(now.year, now.month, int(day))
-    weekday = get_weekday_korean(selected_date)
+    parts = callback.data.split("_")
+    workplace_id = int(parts[2])
+    day = parts[3]
     
-    await callback.message.edit_text(
-        f"📍 {now.month}월 {day}일 ({weekday})\n근무 시간을 선택하세요:", 
-        reply_markup=kbd.select_hours_inline(day)
+    await safe_edit_or_answer(
+        callback,
+        f"📅 {day}일 근무 시간을 선택하세요:",
+        reply_markup=kbd.select_hours_inline(day, workplace_id)
     )
 
-# Ignore callback (kalendar sarlavhasi uchun)
-@router.callback_query(F.data == "ignore")
-async def ignore_callback(callback: CallbackQuery):
-    await callback.answer()
-
-# --- SAQLASH ---
+# --- SOATNI SAQLASH ---
 @router.callback_query(F.data.startswith("save_"))
 async def save_hours(callback: CallbackQuery):
-    parts = callback.data.split("_")
-    if len(parts) != 3:
-        await callback.answer("❌ 오류가 발생했습니다.")
-        return
+    await callback.answer()
     
-    _, day, hours = parts
+    parts = callback.data.split("_")
+    workplace_id = int(parts[1])
+    day = parts[2]
+    hours_str = parts[3]
+    
+    hours_float = float(hours_str)
     user_id = callback.from_user.id
     work_date = datetime.now().strftime(f"%Y-%m-{int(day):02d}")
-    hours_float = float(hours)
-
+    
     async with aiosqlite.connect(db.DB_PATH) as conn:
-        if hours_float == 0:
-            # 휴무 - 0 soat saqlash
-            await conn.execute("""
-                INSERT INTO work_logs (user_id, work_date, hours) 
-                VALUES (?, ?, ?)
-                ON CONFLICT(user_id, work_date) DO UPDATE SET hours = excluded.hours
-            """, (user_id, work_date, 0.0))
-        else:
-            await conn.execute("""
-                INSERT INTO work_logs (user_id, work_date, hours) 
-                VALUES (?, ?, ?)
-                ON CONFLICT(user_id, work_date) DO UPDATE SET hours = excluded.hours
-            """, (user_id, work_date, hours_float))
+        await conn.execute("""
+            INSERT INTO work_logs (user_id, workplace_id, work_date, hours) 
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, workplace_id, work_date) DO UPDATE SET hours = excluded.hours
+        """, (user_id, workplace_id, work_date, hours_float))
         await conn.commit()
-
+    
     if hours_float == 0:
         await callback.answer(f"✅ {day}일 휴무로 저장되었습니다!")
     else:
-        await callback.answer(f"✅ {day}일 {hours}시간 저장완료!")
-    
-    await callback.message.edit_text(
-        "수정할 다른 날짜를 선택하세요:", 
-        reply_markup=kbd.edit_days_inline()
-    )
+        await callback.answer(f"✅ {day}일 {hours_str}시간 저장완료!")
+
+    await show_calendar_for_workplace(callback, workplace_id)
 
 # --- QO'LDA KIRITISH ---
 @router.callback_query(F.data.startswith("manual_edit_"))
 async def manual_input_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    day = callback.data.split("_")[-1]
-    await state.update_data(editing_day=day)
+    
+    parts = callback.data.split("_")
+    workplace_id = int(parts[2])
+    day = parts[3]
+    
+    await state.update_data(workplace_id=workplace_id, editing_day=day)
     await callback.message.answer(f"⌨️ {day}일 근무 시간을 입력해주세요 (예: 9.5):")
-    await state.set_state(Form.edit_manual_day)
+    await state.set_state(Form.edit_manual_workplace_day)
 
-@router.message(Form.edit_manual_day)
+@router.message(Form.edit_manual_workplace_day)
 async def process_manual_input(message: Message, state: FSMContext):
     try:
         data = await state.get_data()
+        workplace_id = data.get("workplace_id")
         day = data.get("editing_day")
         hours = float(message.text.replace(',', '.'))
         
@@ -352,10 +397,10 @@ async def process_manual_input(message: Message, state: FSMContext):
 
         async with aiosqlite.connect(db.DB_PATH) as conn:
             await conn.execute("""
-                INSERT INTO work_logs (user_id, work_date, hours) 
-                VALUES (?, ?, ?)
-                ON CONFLICT(user_id, work_date) DO UPDATE SET hours = excluded.hours
-            """, (user_id, work_date, hours))
+                INSERT INTO work_logs (user_id, workplace_id, work_date, hours) 
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, workplace_id, work_date) DO UPDATE SET hours = excluded.hours
+            """, (user_id, workplace_id, work_date, hours))
             await conn.commit()
 
         await message.answer(
@@ -366,7 +411,7 @@ async def process_manual_input(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("❌ 숫자만 입력해주세요.")
 
-# --- KUNLIK HISOBOT (HAFTA KUNI BILAN) ---
+# --- KUNLIK HISOBOT ---
 @router.callback_query(F.data == "view_report")
 async def view_report(callback: CallbackQuery):
     await callback.answer()
@@ -396,21 +441,16 @@ async def view_report(callback: CallbackQuery):
         total_month_hours = 0
         
         for date_str, hours in rows:
-            # '2026-02-05' -> '05' qismini olish
             day_only = date_str.split('-')[-1]
-            
-            # Hafta kunini aniqlash
             date_obj = datetime.strptime(date_str, '%Y-%m-%d')
             weekday = get_weekday_korean(date_obj)
             
-            # 휴무 yoki soatlar
             if hours == 0:
                 report_lines.append(f"▫️ {day_only}일 ({weekday}): 🏖 휴무")
             else:
                 report_lines.append(f"▫️ {day_only}일 ({weekday}): {hours}시간")
                 total_month_hours += hours
         
-        # Hisob-kitoblar
         gross_pay = total_month_hours * hourly_rate
         tax_amount = gross_pay * (tax_rate / 100)
         net_pay = gross_pay - tax_amount
@@ -423,23 +463,20 @@ async def view_report(callback: CallbackQuery):
 
         text = "\n".join(report_lines)
 
-    try:
-        await callback.message.edit_text(
-            text, 
-            reply_markup=kbd.main_menu_inline(),
-            parse_mode=None
-        )
-    except Exception:
-        await callback.answer()
-        await callback.message.answer(text, reply_markup=kbd.main_menu_inline(), parse_mode=None)
+    await safe_edit_or_answer(
+        callback,
+        text,
+        reply_markup=kbd.main_menu_inline()
+    )
 
-# --- KUNLIK AVTOMATIK SO'ROV (soat 05:00 da) ---
+# --- KUNLIK AVTOMATIK SO'ROV ---
 @router.callback_query(F.data.startswith("daily_report_"))
 async def process_daily_report(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    
     parts = callback.data.split("_")
     
     if parts[-1] == "manual":
-        # Qo'lda kiritish
         await callback.message.answer("⌨️ 어제 근무 시간을 입력해주세요 (예: 10.5):")
         await state.set_state(Form.daily_manual_input)
         return
@@ -447,28 +484,32 @@ async def process_daily_report(callback: CallbackQuery, state: FSMContext):
     hours = float(parts[-1])
     user_id = callback.from_user.id
     
-    # MUHIM: Kecha kunini saqlash (ertalab 04:00 da ishdan chiqqan, 05:00 da so'ralayapti)
-    # 05:00 da so'ralsa, kecha kuniga yoziladi
     yesterday = datetime.now() - timedelta(days=1)
     work_date = yesterday.strftime("%Y-%m-%d")
 
+    # Foydalanuvchining ishxonasini olish (birinchi ishxona)
+    workplaces = await db.get_user_workplaces(user_id)
+    workplace_id = workplaces[0][0] if workplaces else None
+
     async with aiosqlite.connect(db.DB_PATH) as conn:
         await conn.execute("""
-            INSERT INTO work_logs (user_id, work_date, hours) 
-            VALUES (?, ?, ?)
-            ON CONFLICT(user_id, work_date) DO UPDATE SET hours = excluded.hours
-        """, (user_id, work_date, hours))
+            INSERT INTO work_logs (user_id, workplace_id, work_date, hours) 
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, workplace_id, work_date) DO UPDATE SET hours = excluded.hours
+        """, (user_id, workplace_id, work_date, hours))
         await conn.commit()
 
     if hours == 0:
         await callback.answer("✅ 휴무로 기록되었습니다!")
-        await callback.message.edit_text(
+        await safe_edit_or_answer(
+            callback,
             f"✅ 어제 ({yesterday.month}월 {yesterday.day}일) 휴무로 저장되었습니다.",
             reply_markup=kbd.main_menu_inline()
         )
     else:
         await callback.answer(f"✅ {hours}시간 기록되었습니다!")
-        await callback.message.edit_text(
+        await safe_edit_or_answer(
+            callback,
             f"✅ 어제 ({yesterday.month}월 {yesterday.day}일) {hours}시간이 저장되었습니다.",
             reply_markup=kbd.main_menu_inline()
         )
@@ -486,12 +527,16 @@ async def process_daily_manual(message: Message, state: FSMContext):
         yesterday = datetime.now() - timedelta(days=1)
         work_date = yesterday.strftime("%Y-%m-%d")
 
+        # Foydalanuvchining ishxonasini olish
+        workplaces = await db.get_user_workplaces(user_id)
+        workplace_id = workplaces[0][0] if workplaces else None
+
         async with aiosqlite.connect(db.DB_PATH) as conn:
             await conn.execute("""
-                INSERT INTO work_logs (user_id, work_date, hours) 
-                VALUES (?, ?, ?)
-                ON CONFLICT(user_id, work_date) DO UPDATE SET hours = excluded.hours
-            """, (user_id, work_date, hours))
+                INSERT INTO work_logs (user_id, workplace_id, work_date, hours) 
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, workplace_id, work_date) DO UPDATE SET hours = excluded.hours
+            """, (user_id, workplace_id, work_date, hours))
             await conn.commit()
 
         await message.answer(

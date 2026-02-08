@@ -75,7 +75,7 @@ def weekdays_inline(selected_days_list):
     return builder.as_markup()
 
 # 4. Kunlarni tahrirlash - KALENDAR ko'rinishda
-def edit_days_inline():
+def edit_days_inline(workplace_id):
     """Oyning kunlarini hafta kunlari bilan kalendar ko'rinishida"""
     builder = InlineKeyboardBuilder()
     
@@ -106,13 +106,13 @@ def edit_days_inline():
     current_day = now.day
     for day in range(1, days_in_month + 1):
         if day == current_day:
-            text = f"📍{day}"
+            text = f" 🔹{day}"
         else:
             text = str(day)
         
         buttons.append(InlineKeyboardButton(
             text=text, 
-            callback_data=f"edit_day_{day}"
+            callback_data=f"edit_day_{workplace_id}_{day}"
         ))
     
     # 7 tadan guruplash (hafta bo'yicha)
@@ -125,29 +125,29 @@ def edit_days_inline():
     return builder.as_markup()
 
 # 5. Soatlarni tanlash - 휴무 bilan
-def select_hours_inline(day):
+def select_hours_inline(day, workplace_id):
     """Soat variantlari va dam olish kuni"""
     builder = InlineKeyboardBuilder()
     
     # 휴무 (Dam olish) tugmasi
-    builder.row(InlineKeyboardButton(text="🏖 휴무", callback_data=f"save_{day}_0"))
+    builder.row(InlineKeyboardButton(text="🏖 휴무", callback_data=f"save_{workplace_id}_{day}_0"))
     
     # Standart soatlar
     standard_hours = [10, 10.5, 11]
     for hours in standard_hours:
         builder.button(
             text=f"{hours}시간", 
-            callback_data=f"save_{day}_{hours}"
+            callback_data=f"save_{workplace_id}_{day}_{hours}"
         )
     
     builder.adjust(3)
     
     # Qo'lda kiritish va orqaga
     builder.row(
-        InlineKeyboardButton(text="⌨️ 직접 입력", callback_data=f"manual_edit_{day}")
+        InlineKeyboardButton(text="⌨️ 직접 입력", callback_data=f"manual_edit_{workplace_id}_{day}")
     )
     builder.row(
-        InlineKeyboardButton(text="⬅️ 뒤로", callback_data="edit_logs")
+        InlineKeyboardButton(text="⬅️ 뒤로", callback_data=f"edit_logs_{workplace_id}")
     )
     
     return builder.as_markup()
@@ -209,8 +209,31 @@ def workplaces_list_inline(workplaces):
             text=f"🏢 {wp_name}",
             callback_data=f"select_workplace_{wp_id}"
         ))
-    builder.row(InlineKeyboardButton(text="➕ 직장 추가", callback_data="add_new_workplace"))
+    builder.row(
+        InlineKeyboardButton(text="➕ 직장 추가", callback_data="add_new_workplace"),
+        InlineKeyboardButton(text="🗑 직장 삭제", callback_data="remove_workplace_list")
+    )
     builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
+    return builder.as_markup()
+
+# Ishxonani o'chirish uchun ro'yxat
+def workplaces_remove_inline(workplaces):
+    builder = InlineKeyboardBuilder()
+    for wp_id, wp_name in workplaces:
+        builder.row(InlineKeyboardButton(
+            text=f"🗑 {wp_name}",
+            callback_data=f"confirm_remove_wp_{wp_id}"
+        ))
+    builder.row(InlineKeyboardButton(text="⬅️ 뒤로", callback_data="my_workplaces"))
+    return builder.as_markup()
+
+# Ishxonani o'chirishni tasdiqlash
+def confirm_remove_workplace_inline(workplace_id):
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✅ 예, 삭제", callback_data=f"delete_wp_{workplace_id}"),
+        InlineKeyboardButton(text="❌ 취소", callback_data="remove_workplace_list")
+    )
     return builder.as_markup()
 
 # Ishxonalar ro'yxati (월별 uchun)
@@ -224,10 +247,21 @@ def workplaces_for_monthly_inline(workplaces):
     builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
     return builder.as_markup()
 
+# Ishxonalar ro'yxati (수정 uchun)
+def workplaces_for_edit_inline(workplaces):
+    builder = InlineKeyboardBuilder()
+    for wp_id, wp_name in workplaces:
+        builder.row(InlineKeyboardButton(
+            text=f"🏢 {wp_name}",
+            callback_data=f"edit_logs_{wp_id}"
+        ))
+    builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
+    return builder.as_markup()
+
 # Ishxona ma'lumoti ko'rsatilgandan keyin
 def workplace_actions_inline(workplace_id):
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="✏️ 근무표 수정", callback_data="edit_logs"))
+    builder.row(InlineKeyboardButton(text="✏️ 근무표 수정", callback_data=f"edit_logs_{workplace_id}"))
     builder.row(InlineKeyboardButton(text="⚙️ 설정", callback_data="settings"))
     builder.row(InlineKeyboardButton(text="⬅️ 뒤로", callback_data="my_workplaces"))
     return builder.as_markup()

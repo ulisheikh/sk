@@ -270,8 +270,34 @@ async def get_monthly_logs_by_workplace(user_id, workplace_id, year, month):
 async def save_work_log_with_workplace(user_id, workplace_id, work_date, hours):
     """Ishxona bilan birga log saqlash"""
     async with aiosqlite.connect(DB_PATH) as db:
+        # Avval mavjud yozuvni o'chirish (agar boshqa workplace_id bo'lsa)
         await db.execute("""
-            INSERT OR REPLACE INTO work_logs (user_id, workplace_id, work_date, hours)
+            DELETE FROM work_logs 
+            WHERE user_id = ? AND work_date = ? AND workplace_id != ?
+        """, (user_id, work_date, workplace_id))
+        
+        # Keyin yangi yoki yangilangan yozuvni qo'shish
+        await db.execute("""
+            INSERT INTO work_logs (user_id, workplace_id, work_date, hours)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, work_date) DO UPDATE SET 
+                workplace_id = excluded.workplace_id,
+                hours = excluded.hours
         """, (user_id, workplace_id, work_date, hours))
         await db.commit()
+
+async def delete_workplace(workplace_id):
+    """Ishxonani o'chirish (ishxona va unga tegishli barcha loglar)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Avval ishxonaga tegishli barcha work_logs ni o'chirish
+        await db.execute(
+            "DELETE FROM work_logs WHERE workplace_id = ?",
+            (workplace_id,)
+        )
+        # Keyin ishxonani o'chirish
+        await db.execute(
+            "DELETE FROM workplaces WHERE id = ?",
+            (workplace_id,)
+        )
+        await db.commit()
+
