@@ -1,14 +1,24 @@
-# Telegram Bot kutubxonasi
-aiogram==3.4.1
+# Telegram Bot kutubxonasi (Python 3.13 uchun eng barqaror versiya)
+aiogram>=3.15.0
 
 # Asinxron SQLite
-aiosqlite==0.19.0
+aiosqlite>=0.20.0
 
 # Vaqt rejalashtirish
-APScheduler==3.10.4
+APScheduler>=3.10.4
 
 # Environment o'zgaruvchilar
-python-dotenv==1.0.0
+python-dotenv>=1.0.0
 
-# Timezone (Koreya vaqti uchun)
-pytz==2024.1
+# Timezone
+pytz>=2024.1
+
+# PDF va Rasm
+reportlab>=4.2.5
+pillow>=11.0.0
+
+# Qo'shimcha (xatolik bermasligi uchun)
+pydantic>=2.10.0
+
+#.env
+environs
