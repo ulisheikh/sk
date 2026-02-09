@@ -4,10 +4,13 @@ from datetime import datetime
 import calendar
 import os
 
-async def create_calendar_image(workplace_name, month, year, work_dict, total_hours, gross, tax, net, hourly_rate, tax_rate):
-    """Kalendar rasmini yaratish"""
+async def create_calendar_image(workplace_name, month, year, work_dict, total_hours, gross, tax, net, hourly_rate, tax_rate, first_name=None, last_name=None):
+    """Kalendar rasmini yaratish (Ism ishxona bilan bir qatorda, o'ngda)"""
     
-    width, height = 900, 1500  # Balandlikni oshirdik
+    full_name_parts = [part for part in [first_name, last_name] if part]
+    display_name = " ".join(full_name_parts) if full_name_parts else "Foydalanuvchi"
+    
+    width, height = 900, 1500
     img = Image.new('RGB', (width, height), color=(240, 248, 255))
     draw = ImageDraw.Draw(img)
     
@@ -30,87 +33,83 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
         if os.path.exists(font_bold) and os.path.exists(font_regular):
             font_title = ImageFont.truetype(font_bold, 45)
             font_header = ImageFont.truetype(font_bold, 32)
+            font_name = ImageFont.truetype(font_regular, 26) 
             font_text = ImageFont.truetype(font_regular, 28)
-            font_small = ImageFont.truetype(font_regular, 20)  # Shriftni kichiklashtirdik
+            font_small = ImageFont.truetype(font_regular, 20)
         else:
             raise FileNotFoundError("Shrift fayllari topilmadi")
-    except Exception as e:
-        font_title = ImageFont.load_default()
-        font_header = ImageFont.load_default()
-        font_text = ImageFont.load_default()
-        font_small = ImageFont.load_default()
+    except Exception:
+        font_title = font_header = font_name = font_text = font_small = ImageFont.load_default()
     
-    # Sarlavha
-    draw.rounded_rectangle([(20, 20), (880, 140)], radius=15, fill=(65, 105, 225), outline=(0, 0, 139), width=3)
-    draw.text((50, 40), f"🏢 {workplace_name}", fill=(255, 255, 255), font=font_title)
-    draw.text((50, 95), f"📅 {year}년 {month}월", fill=(255, 255, 255), font=font_header)
+    # Sarlavha qutisi
+    draw.rounded_rectangle([(20, 20), (880, 165)], radius=15, fill=(65, 105, 225), outline=(0, 0, 139), width=3)
+    
+    # 1. Ishxona nomi (Chapda)
+    draw.text((60, 45), f"🏢 {workplace_name}", fill=(255, 255, 255), font=font_title)
+    
+    # 2. Foydalanuvchi ismi (Ishxona bilan bir qatorda, lekin O'NGDA)
+    name_text = f"👤 {display_name}"
+    name_bbox = draw.textbbox((0, 0), name_text, font=font_name)
+    name_width = name_bbox[2] - name_bbox[0]
+    # O'ng tomondan 60px masofada taqash
+    draw.text((840 - name_width, 60), name_text, fill=(220, 220, 220), font=font_name)
+    
+    # 3. Sana (Pastki qatorda)
+    draw.text((60, 115), f"📅 {year}년 {month}월", fill=(255, 255, 255), font=font_header)
     
     # Hafta kunlari
-    draw.rounded_rectangle([(40, 170), (860, 220)], radius=10, fill=(100, 149, 237), outline=(70, 130, 180), width=2)
+    draw.rounded_rectangle([(40, 185), (860, 235)], radius=10, fill=(100, 149, 237), outline=(70, 130, 180), width=2)
     
     weekday_names = ["월", "화", "수", "목", "금", "토", "일"]
     x_start = 70
-    spacing = 110  # Kenglikni oshirdik
+    spacing = 110
     
     for i, day in enumerate(weekday_names):
         x_pos = x_start + i * spacing
-        draw.text((x_pos, 180), day, fill=(255, 255, 255), font=font_header)
+        draw.text((x_pos, 195), day, fill=(255, 255, 255), font=font_header)
     
-    # Kalendar
+    # Kalendar kunlari mantiqi
     days_in_month = calendar.monthrange(year, month)[1]
     first_day = datetime(year, month, 1)
     start_weekday = first_day.weekday()
     
-    y_pos = 250
+    y_pos = 265
     x_pos = x_start + start_weekday * spacing
     
     for day in range(1, days_in_month + 1):
         date_str = f"{year}-{month:02d}-{day:02d}"
         hours = work_dict.get(date_str, None)
         
-        # KATTAROQ KATAKCHALAR
-        box_x1 = x_pos - 50
-        box_y1 = y_pos - 10
-        box_x2 = x_pos + 60
-        box_y2 = y_pos + 110  # Balandlikni oshirdik
+        box_x1, box_y1 = x_pos - 50, y_pos - 10
+        box_x2, box_y2 = x_pos + 60, y_pos + 110
         
         if hours is not None:
-            if hours == 0:
-                draw.rounded_rectangle([(box_x1, box_y1), (box_x2, box_y2)], radius=8, fill=(255, 200, 200), outline=(255, 100, 100), width=2)
-            else:
-                draw.rounded_rectangle([(box_x1, box_y1), (box_x2, box_y2)], radius=8, fill=(200, 255, 200), outline=(100, 200, 100), width=2)
+            color = (200, 255, 200) if hours > 0 else (255, 200, 200)
+            outline = (100, 200, 100) if hours > 0 else (255, 100, 100)
+            draw.rounded_rectangle([(box_x1, box_y1), (box_x2, box_y2)], radius=8, fill=color, outline=outline, width=2)
         else:
             draw.rounded_rectangle([(box_x1, box_y1), (box_x2, box_y2)], radius=8, fill=(240, 240, 240), outline=(200, 200, 200), width=1)
         
-        # Kun raqami
         day_text = str(day)
         bbox = draw.textbbox((0, 0), day_text, font=font_text)
-        text_width = bbox[2] - bbox[0]
-        draw.text((x_pos - text_width//2 + 5, y_pos + 5), day_text, fill=(0, 0, 0), font=font_text)
+        draw.text((x_pos - (bbox[2]-bbox[0])//2 + 5, y_pos + 5), day_text, fill=(0, 0, 0), font=font_text)
         
-        # Soat yoki휴무
         if hours is not None:
-            if hours == 0:
-                휴무_bbox = draw.textbbox((0, 0), "휴무", font=font_text)
-                휴무_width = 휴무_bbox[2] - 휴무_bbox[0]
-                draw.text((x_pos - 휴무_width//2 + 5, y_pos + 50), "휴무", fill=(255, 0, 0), font=font_text)
-            else:
-                h_str = f"{hours}시간"
-                h_bbox = draw.textbbox((0, 0), h_str, font=font_small)
-                h_width = h_bbox[2] - h_bbox[0]
-                draw.text((x_pos - h_width//2 + 5, y_pos + 55), h_str, fill=(0, 100, 0), font=font_small)
+            txt = "휴무" if hours == 0 else f"{hours}h"
+            fnt = font_text if hours == 0 else font_small
+            clr = (255, 0, 0) if hours == 0 else (0, 100, 0)
+            t_bbox = draw.textbbox((0, 0), txt, font=fnt)
+            draw.text((x_pos - (t_bbox[2]-t_bbox[0])//2 + 5, y_pos + 55), txt, fill=clr, font=fnt)
         
-        date_obj = datetime(year, month, day)
-        if date_obj.weekday() == 6:
-            y_pos += 130  # Qator orasini oshirdik
+        if datetime(year, month, day).weekday() == 6:
+            y_pos += 130
             x_pos = x_start
         else:
             x_pos += spacing
     
-    # Natija
+    # Summary qismi
     summary_y = y_pos + 130
     draw.rounded_rectangle([(40, summary_y), (860, summary_y + 220)], radius=15, fill=(255, 250, 205), outline=(255, 215, 0), width=3)
-    
     draw.text((60, summary_y + 20), f"⏱️ 총 근무시간: {total_hours}시간", fill=(0, 0, 0), font=font_header)
     draw.text((60, summary_y + 65), f"💰 세전 급여: {gross:,.0f}원", fill=(0, 0, 0), font=font_text)
     draw.text((60, summary_y + 105), f"📉 세금 ({tax_rate}%): {tax:,.0f}원", fill=(139, 0, 0), font=font_text)
@@ -119,5 +118,4 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
     bio = io.BytesIO()
     img.save(bio, 'PNG')
     bio.seek(0)
-    
     return bio

@@ -132,7 +132,9 @@ async def show_workplace_report(callback: CallbackQuery):
     image = await create_calendar_image(
         workplace_name, month, year, 
         work_dict, total_hours, gross, tax, net,
-        hourly_rate, tax_rate
+        hourly_rate, tax_rate,
+        first_name=callback.from_user.first_name,
+        last_name=callback.from_user.last_name
     )
     
     # Eski xabarni o'chirish
@@ -293,7 +295,9 @@ async def view_selected_month(callback: CallbackQuery):
     image = await create_calendar_image(
         workplace_name, month, year, 
         work_dict, total_hours, gross, tax, net,
-        hourly_rate, tax_rate
+        hourly_rate, tax_rate,
+        first_name=callback.from_user.first_name,
+        last_name=callback.from_user.last_name
     )
     
     # Eski xabarni o'chirish
