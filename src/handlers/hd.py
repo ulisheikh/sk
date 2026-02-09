@@ -338,35 +338,30 @@ async def edit_day(callback: CallbackQuery):
         reply_markup=kbd.select_hours_inline(day, workplace_id)
     )
 
-# --- SOATNI SAQLASH ---
+# --- SAQLASH ---
 @router.callback_query(F.data.startswith("save_"))
-async def save_hours(callback: CallbackQuery):
-    await callback.answer()
-    
+async def save_hours(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
-    workplace_id = int(parts[1])
-    day = parts[2]
-    hours_str = parts[3]
+    if len(parts) != 4:
+        await callback.answer("❌ 오류가 발생했습니다.")
+        return
     
-    hours_float = float(hours_str)
+    _, workplace_id_str, day, hours = parts
+    workplace_id = int(workplace_id_str)
     user_id = callback.from_user.id
     work_date = datetime.now().strftime(f"%Y-%m-{int(day):02d}")
-    
-    async with aiosqlite.connect(db.DB_PATH) as conn:
-        await conn.execute("""
-            INSERT INTO work_logs (user_id, workplace_id, work_date, hours) 
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(user_id, workplace_id, work_date) DO UPDATE SET hours = excluded.hours
-        """, (user_id, workplace_id, work_date, hours_float))
-        await conn.commit()
-    
+    hours_float = float(hours)
+
+    # Database ga workplace_id bilan saqlash
+    await db.save_work_log_with_workplace(user_id, workplace_id, work_date, hours_float)
+
     if hours_float == 0:
         await callback.answer(f"✅ {day}일 휴무로 저장되었습니다!")
     else:
-        await callback.answer(f"✅ {day}일 {hours_str}시간 저장완료!")
-
+        await callback.answer(f"✅ {day}일 {hours}시간 저장완료!")
+    
+    # Kalendarga qaytish
     await show_calendar_for_workplace(callback, workplace_id)
-
 # --- QO'LDA KIRITISH ---
 @router.callback_query(F.data.startswith("manual_edit_"))
 async def manual_input_start(callback: CallbackQuery, state: FSMContext):
