@@ -95,7 +95,7 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
         draw.text((x_pos - (bbox[2]-bbox[0])//2 + 5, y_pos + 5), day_text, fill=(0, 0, 0), font=font_text)
         
         if hours is not None:
-            txt = "휴무" if hours == 0 else f"{hours}h"
+            txt = "휴무" if hours == 0 else f"{hours}시간"
             fnt = font_text if hours == 0 else font_small
             clr = (255, 0, 0) if hours == 0 else (0, 100, 0)
             t_bbox = draw.textbbox((0, 0), txt, font=fnt)
