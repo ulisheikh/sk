@@ -1,3 +1,4 @@
+import pytz
 import asyncio
 import sys
 import aiosqlite
@@ -26,26 +27,31 @@ async def set_bot_commands(bot: Bot):
     await bot.set_my_commands(commands)
 
 async def send_morning_reminder(bot: Bot):
-    """Har kuni 05:00 da inline tugmalar bilan so'rov yuborish"""
+    """Har kuni 05:00 da (Seoul vaqti bilan) inline tugmalar bilan so'rov yuborish"""
     try:
+        # Koreya vaqt mintaqasini belgilaymiz (Server Parijda bo'lsa ham adashmasligi uchun)
+        seoul_tz = pytz.timezone("Asia/Seoul")
+        
+        # Ma'lumotlar bazasidan foydalanuvchilarni olish
         async with aiosqlite.connect(db.DB_PATH) as conn:
             async with conn.execute("SELECT user_id FROM users") as cursor:
                 users = await cursor.fetchall()
         
-        # Bugungi sana
-        today = datetime.now()
+        # Bugungi sana (Aynan Koreya vaqti bilan)
+        today = datetime.now(seoul_tz)
         
-        # Kecha sanasi
+        # Kecha sanasi (Koreya vaqtidan 1 kun ayiramiz)
         yesterday = today - timedelta(days=1)
         yesterday_str = f"{yesterday.month}월 {yesterday.day}일"
         
-        # DEBUG - terminalda ko'rish uchun
-        print(f"[REMINDER] Xabar yuborish vaqti: {today.strftime('%Y-%m-%d %H:%M:%S')}")
+        # DEBUG - terminalda ko'rish uchun (Koreya vaqtini ko'rsatadi)
+        print(f"[REMINDER] Xabar yuborish vaqti (Seoul): {today.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"[REMINDER] So'ralayotgan kun: {yesterday_str} ({yesterday.strftime('%Y-%m-%d')})")
         print(f"[REMINDER] Foydalanuvchilar soni: {len(users)}")
         
         for user in users:
             try:
+                # user[0] bu user_id
                 await bot.send_message(
                     user[0], 
                     f"☀️ 좋은 아침입니다!\n\n어제 ({yesterday_str}) 근무 시간을 기록해주세요:",
