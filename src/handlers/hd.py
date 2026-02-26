@@ -391,29 +391,28 @@ async def process_daily_report(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
     
     if parts[-1] == "manual":
-        # Qo'lda kiritish
-        await callback.message.answer("⌨️ 어제 근무 시간을 입력해주세요 (예: 10.5):")
+        await callback.message.answer("⌨️ 오늘 근무 시간을 입력해주세요 (예: 10.5):")
         await state.set_state(Form.daily_manual_input)
         return
     
     hours = float(parts[-1])
     user_id = callback.from_user.id
     
-    # TO'G'RI: Bugungi sana (05:00 da bugun uchun yoziladi)
+    # Bugungi sana
     from datetime import datetime
     import pytz
     
     seoul_tz = pytz.timezone("Asia/Seoul")
     today = datetime.now(seoul_tz)
     work_date = today.strftime("%Y-%m-%d")
+    
+    # Default workplace_id=1 (birinchi ishxona)
+    # Yoki foydalanuvchining birinchi ishxonasini olish
+    workplaces = await db.get_user_workplaces(user_id)
+    workplace_id = workplaces[0][0] if workplaces else 1
 
-    async with aiosqlite.connect(db.DB_PATH) as conn:
-        await conn.execute("""
-            INSERT INTO work_logs (user_id, work_date, hours) 
-            VALUES (?, ?, ?)
-            ON CONFLICT(user_id, work_date) DO UPDATE SET hours = excluded.hours
-        """, (user_id, work_date, hours))
-        await conn.commit()
+    # db.save_work_log_with_workplace ishlatish
+    await db.save_work_log_with_workplace(user_id, workplace_id, work_date, hours)
 
     if hours == 0:
         await callback.answer("✅ 휴무로 기록되었습니다!")
@@ -427,6 +426,7 @@ async def process_daily_report(callback: CallbackQuery, state: FSMContext):
             f"✅ 오늘 ({today.month}월 {today.day}일) {hours}시간이 저장되었습니다.",
             reply_markup=kbd.main_menu_inline()
         )
+
 @router.message(Form.daily_manual_input)
 async def process_daily_manual(message: Message, state: FSMContext):
     try:
@@ -438,21 +438,19 @@ async def process_daily_manual(message: Message, state: FSMContext):
         
         user_id = message.from_user.id
         
-        # TO'G'RI: Bugungi sana
+        # Bugungi sana
         from datetime import datetime
         import pytz
         
         seoul_tz = pytz.timezone("Asia/Seoul")
         today = datetime.now(seoul_tz)
         work_date = today.strftime("%Y-%m-%d")
+        
+        # Default workplace_id
+        workplaces = await db.get_user_workplaces(user_id)
+        workplace_id = workplaces[0][0] if workplaces else 1
 
-        async with aiosqlite.connect(db.DB_PATH) as conn:
-            await conn.execute("""
-                INSERT INTO work_logs (user_id, work_date, hours) 
-                VALUES (?, ?, ?)
-                ON CONFLICT(user_id, work_date) DO UPDATE SET hours = excluded.hours
-            """, (user_id, work_date, hours))
-            await conn.commit()
+        await db.save_work_log_with_workplace(user_id, workplace_id, work_date, hours)
 
         await message.answer(
             f"✅ 오늘 ({today.month}월 {today.day}일) {hours}시간이 저장되었습니다!",
@@ -461,7 +459,7 @@ async def process_daily_manual(message: Message, state: FSMContext):
         await state.clear()
     except ValueError:
         await message.answer("❌ 숫자만 입력해주세요.")
-
+        
 @router.message(F.text == "내 정보")
 async def user_info(message: Message):
     user_id = message.from_user.id
