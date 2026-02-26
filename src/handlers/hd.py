@@ -312,6 +312,30 @@ async def process_manual_input(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("❌ 숫자만 입력해주세요.")
 
+# --- DEFAULT HOLATGA QAYTARISH ---
+@router.callback_query(F.data.startswith("clear_"))
+async def clear_work_log(callback: CallbackQuery):
+    await callback.answer()
+    parts = callback.data.split("_")
+    workplace_id = int(parts[1])
+    day = parts[2]
+    
+    user_id = callback.from_user.id
+    work_date = datetime.now().strftime(f"%Y-%m-{int(day):02d}")
+    
+    # Ma'lumotni o'chirish
+    async with aiosqlite.connect(db.DB_PATH) as conn:
+        await conn.execute("""
+            DELETE FROM work_logs 
+            WHERE user_id = ? AND work_date = ? AND workplace_id = ?
+        """, (user_id, work_date, workplace_id))
+        await conn.commit()
+    
+    await callback.answer(f"✅ {day}일 기록이 삭제되었습니다!")
+    
+    # Kalendarga qaytish
+    await show_calendar_for_workplace(callback, workplace_id)
+
 @router.callback_query(F.data == "view_report")
 async def view_report(callback: CallbackQuery):
     await callback.answer()
@@ -361,61 +385,79 @@ async def view_report(callback: CallbackQuery):
 
     await safe_edit_or_answer(callback, text, reply_markup=kbd.main_menu_inline())
 
+# --- KUNLIK AVTOMATIK SO'ROV (soat 05:00 da) ---
 @router.callback_query(F.data.startswith("daily_report_"))
 async def process_daily_report(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
     parts = callback.data.split("_")
     
     if parts[-1] == "manual":
+        # Qo'lda kiritish
         await callback.message.answer("⌨️ 어제 근무 시간을 입력해주세요 (예: 10.5):")
         await state.set_state(Form.daily_manual_input)
         return
     
     hours = float(parts[-1])
     user_id = callback.from_user.id
-    yesterday = datetime.now() - timedelta(days=1)
-    work_date = yesterday.strftime("%Y-%m-%d")
-    workplaces = await db.get_user_workplaces(user_id)
-    workplace_id = workplaces[0][0] if workplaces else None
+    
+    # TO'G'RI: Bugungi sana (05:00 da bugun uchun yoziladi)
+    from datetime import datetime
+    import pytz
+    
+    seoul_tz = pytz.timezone("Asia/Seoul")
+    today = datetime.now(seoul_tz)
+    work_date = today.strftime("%Y-%m-%d")
 
     async with aiosqlite.connect(db.DB_PATH) as conn:
         await conn.execute("""
-            INSERT INTO work_logs (user_id, workplace_id, work_date, hours) 
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(user_id, workplace_id, work_date) DO UPDATE SET hours = excluded.hours
-        """, (user_id, workplace_id, work_date, hours))
+            INSERT INTO work_logs (user_id, work_date, hours) 
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id, work_date) DO UPDATE SET hours = excluded.hours
+        """, (user_id, work_date, hours))
         await conn.commit()
 
     if hours == 0:
         await callback.answer("✅ 휴무로 기록되었습니다!")
-        await safe_edit_or_answer(callback, f"✅ 어제 ({yesterday.month}월 {yesterday.day}일) 휴무로 저장되었습니다.", reply_markup=kbd.main_menu_inline())
+        await callback.message.edit_text(
+            f"✅ 오늘 ({today.month}월 {today.day}일) 휴무로 저장되었습니다.",
+            reply_markup=kbd.main_menu_inline()
+        )
     else:
         await callback.answer(f"✅ {hours}시간 기록되었습니다!")
-        await safe_edit_or_answer(callback, f"✅ 어제 ({yesterday.month}월 {yesterday.day}일) {hours}시간이 저장되었습니다.", reply_markup=kbd.main_menu_inline())
-
+        await callback.message.edit_text(
+            f"✅ 오늘 ({today.month}월 {today.day}일) {hours}시간이 저장되었습니다.",
+            reply_markup=kbd.main_menu_inline()
+        )
 @router.message(Form.daily_manual_input)
 async def process_daily_manual(message: Message, state: FSMContext):
     try:
         hours = float(message.text.replace(',', '.'))
+        
         if hours < 0 or hours > 24:
             await message.answer("❌ 0-24 사이의 시간을 입력해주세요.")
             return
         
         user_id = message.from_user.id
-        yesterday = datetime.now() - timedelta(days=1)
-        work_date = yesterday.strftime("%Y-%m-%d")
-        workplaces = await db.get_user_workplaces(user_id)
-        workplace_id = workplaces[0][0] if workplaces else None
+        
+        # TO'G'RI: Bugungi sana
+        from datetime import datetime
+        import pytz
+        
+        seoul_tz = pytz.timezone("Asia/Seoul")
+        today = datetime.now(seoul_tz)
+        work_date = today.strftime("%Y-%m-%d")
 
         async with aiosqlite.connect(db.DB_PATH) as conn:
             await conn.execute("""
-                INSERT INTO work_logs (user_id, workplace_id, work_date, hours) 
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(user_id, workplace_id, work_date) DO UPDATE SET hours = excluded.hours
-            """, (user_id, workplace_id, work_date, hours))
+                INSERT INTO work_logs (user_id, work_date, hours) 
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id, work_date) DO UPDATE SET hours = excluded.hours
+            """, (user_id, work_date, hours))
             await conn.commit()
 
-        await message.answer(f"✅ 어제 ({yesterday.month}월 {yesterday.day}일) {hours}시간이 저장되었습니다!", reply_markup=kbd.main_menu_inline())
+        await message.answer(
+            f"✅ 오늘 ({today.month}월 {today.day}일) {hours}시간이 저장되었습니다!",
+            reply_markup=kbd.main_menu_inline()
+        )
         await state.clear()
     except ValueError:
         await message.answer("❌ 숫자만 입력해주세요.")

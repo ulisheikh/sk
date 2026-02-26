@@ -125,6 +125,7 @@ def edit_days_inline(workplace_id):
     return builder.as_markup()
 
 # 5. Soatlarni tanlash - 휴무 bilan
+# 5. Soatlarni tanlash - 휴무 bilan
 def select_hours_inline(day, workplace_id):
     """Soat variantlari va dam olish kuni"""
     builder = InlineKeyboardBuilder()
@@ -142,10 +143,16 @@ def select_hours_inline(day, workplace_id):
     
     builder.adjust(3)
     
-    # Qo'lda kiritish va orqaga
+    # Qo'lda kiritish
     builder.row(
         InlineKeyboardButton(text="⌨️ 직접 입력", callback_data=f"manual_edit_{workplace_id}_{day}")
     )
+    
+    # YANGI: Default holatga qaytarish
+    builder.row(
+        InlineKeyboardButton(text="🔄 기록 삭제", callback_data=f"clear_{workplace_id}_{day}")
+    )
+    
     builder.row(
         InlineKeyboardButton(text="⬅️ 뒤로", callback_data=f"edit_logs_{workplace_id}")
     )
