@@ -22,7 +22,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 # ------------- CONFIG -------------
-BOT_TOKEN = "8515364508:AAG6DLaVbwLirYtqpKaqupzkMLmApoMzYYw"
+BOT_TOKEN = "8515364508:AAEkw4DDJFuRXtX2vMHZKF7B_6HauRcVAU0"
 TC_PY = "tc.py"
 STATE_FILE = "quiz_state.json"
 BLOCK_INTERVAL_MIN = 12
