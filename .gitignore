@@ -49,9 +49,9 @@ pip-log.txt
 *.ipynb_checkpoints
 
 # --- Environment variables ---
-# .env
-# .env.*
-# *.env
+.env
+.env.*
+*.env
 
 # --- VSCode ---
 .vscode/
@@ -79,6 +79,6 @@ backups/
 backup_*.json
 
 #------USERS------
-# .users.json
-# .users.db
+.users.json
+.users.db
 
