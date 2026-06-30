@@ -77,3 +77,8 @@ backups/
 *.backup
 *.bak
 backup_*.json
+
+#------USERS------
+# .users.json
+# .users.db
+

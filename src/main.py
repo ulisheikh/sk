@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 # Loyiha yo'lini sozlash
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from src.utils.config import BOT_TOKEN
+from config import BOT_TOKEN
 from src.handlers import hd
 from src.handlers import hd_admin
 from src.handlers import hd_workplace

@@ -20,9 +20,14 @@ from aiogram.types import (
 from difflib import SequenceMatcher
 from aiogram.filters import Command
 from aiogram.types import Message
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from config import KALI_TOKEN
 
 # ------------- CONFIG -------------
-BOT_TOKEN = "8515364508:AAEkw4DDJFuRXtX2vMHZKF7B_6HauRcVAU0"
+# BOT_TOKEN = "8515364508:AAEkw4DDJFuRXtX2vMHZKF7B_6HauRcVAU0"
 TC_PY = "tc.py"
 STATE_FILE = "quiz_state.json"
 BLOCK_INTERVAL_MIN = 12
@@ -34,7 +39,7 @@ USERS_DB = "users.db"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=KALI_TOKEN)
 dp = Dispatcher()
 
 DATA_DIR = pathlib.Path(".")
