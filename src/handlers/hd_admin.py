@@ -97,6 +97,7 @@ async def show_user_menu(callback: CallbackQuery):
 
     full_name, username, hourly_rate, tax_rate, work_days = user_data
     display_name = full_name if full_name else (username if username else f"User {user_id}")
+    reminder_time = await db.get_user_reminder_time(user_id)
 
     text = f"""👤 {display_name}
 
@@ -107,6 +108,7 @@ async def show_user_menu(callback: CallbackQuery):
 💰 시급: {hourly_rate:,}원
 📉 세금: {tax_rate}%
 📅 근무요일: {work_days}
+⏰ 알림 시간: {reminder_time}
 
 원하는 작업을 선택하세요:
 """
@@ -138,7 +140,7 @@ async def admin_view_report(callback: CallbackQuery):
 
     async with aiosqlite.connect(db.DB_PATH) as conn:
         async with conn.execute("""
-            SELECT work_date, hours FROM work_logs 
+            SELECT work_date, hours, note FROM work_logs 
             WHERE user_id = ? AND work_date LIKE ?
             ORDER BY work_date ASC
         """, (user_id, f"{current_month}%")) as c:
@@ -158,7 +160,10 @@ async def admin_view_report(callback: CallbackQuery):
         report_lines = [f"👤 {full_name}\n📅 {now.month}월 근무 상세 기록\n"]
         total_month_hours = 0
 
-        for date_str, hours in rows:
+        for row in rows:
+            date_str, hours = row[0], row[1]
+            note = row[2] if len(row) > 2 else None
+
             day_only = date_str.split('-')[-1]
             date_obj = datetime.strptime(date_str, '%Y-%m-%d')
             weekday = get_weekday_korean(date_obj)
@@ -168,6 +173,9 @@ async def admin_view_report(callback: CallbackQuery):
             else:
                 report_lines.append(f"▫️ {day_only}일 ({weekday}): {hours}시간")
                 total_month_hours += hours
+
+            if note:
+                report_lines.append(f"    📝 {note}")
 
         gross_pay = total_month_hours * hourly_rate
         tax_amount = gross_pay * (tax_rate / 100)

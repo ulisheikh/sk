@@ -56,7 +56,19 @@ def settings_inline():
     builder.row(InlineKeyboardButton(text="💰 시급 수정", callback_data="edit_rate"))
     builder.row(InlineKeyboardButton(text="📉 세금 수정", callback_data="edit_tax"))
     builder.row(InlineKeyboardButton(text="📅 근무요일 수정", callback_data="edit_workdays"))
+    builder.row(InlineKeyboardButton(text="⏰ 알림 시간 수정", callback_data="edit_reminder_time"))
     builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
+    return builder.as_markup()
+
+# 2a. YANGI: Ertalabki eslatma vaqtini tanlash (tez tanlov + qo'lda kiritish)
+def reminder_time_inline():
+    builder = InlineKeyboardBuilder()
+    quick_times = ["05:00", "06:00", "07:00", "08:00", "09:00", "22:00"]
+    for t in quick_times:
+        builder.button(text=t, callback_data=f"set_reminder_{t}")
+    builder.adjust(3)
+    builder.row(InlineKeyboardButton(text="⌨️ 직접 입력", callback_data="reminder_manual"))
+    builder.row(InlineKeyboardButton(text="⬅️ 뒤로", callback_data="settings"))
     return builder.as_markup()
 
 # 3. YANGI: Hafta kunlari + har bir kun uchun soat birga tanlanadi (kvadrat, tartibli grid)
@@ -194,7 +206,7 @@ def select_hours_inline(day, workplace_id):
 
 # 7. Kunlik so'rov - soat 05:00 da (mavjud ma'lumot bo'lmaganda fallback)
 def daily_report_inline():
-    """Har kuni 05:00 da so'raladigan inline menu"""
+    """Har kuni belgilangan vaqtda so'raladigan inline menu"""
     builder = InlineKeyboardBuilder()
 
     builder.row(InlineKeyboardButton(text="🏖 휴무", callback_data="daily_report_0"))

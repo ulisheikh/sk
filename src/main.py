@@ -28,31 +28,41 @@ async def set_bot_commands(bot: Bot):
     await bot.set_my_commands(commands)
 
 async def send_morning_reminder(bot: Bot):
-    """Har kuni 05:00 da (Seoul vaqti bilan) - agar oldindan jadval bo'yicha ma'lumot
-    to'ldirilgan bo'lsa, faqat tasdiqlashni so'raydi. Aks holda eskisidek soat so'raydi."""
+    """Har daqiqada ishga tushadi (Seoul vaqti bilan) va har bir foydalanuvchining
+    PROFIL bo'limida o'zi belgilagan vaqtida eslatma yuboradi (⏰ 알림 시간 수정).
+
+    Agar shu kunda oldindan jadval bo'yicha ma'lumot to'ldirilgan bo'lsa,
+    faqat tasdiqlashni so'raydi. Aks holda eskisidek soatni so'raydi.
+    Har bir userga kuniga faqat bitta marta yuboriladi (last_reminder_date orqali)."""
     try:
         seoul_tz = pytz.timezone("Asia/Seoul")
+        now = datetime.now(seoul_tz)
+        current_hm = now.strftime("%H:%M")
+        today_str = now.strftime("%Y-%m-%d")
 
-        async with aiosqlite.connect(db.DB_PATH) as conn:
-            async with conn.execute("SELECT user_id FROM users") as cursor:
-                users = await cursor.fetchall()
-
-        today = datetime.now(seoul_tz)
-        yesterday = today - timedelta(days=1)
+        yesterday = now - timedelta(days=1)
         yesterday_str = f"{yesterday.month}월 {yesterday.day}일"
         yesterday_date = yesterday.strftime("%Y-%m-%d")
 
-        print(f"[REMINDER] Xabar yuborish vaqti (Seoul): {today.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"[REMINDER] So'ralayotgan kun: {yesterday_str} ({yesterday_date})")
-        print(f"[REMINDER] Foydalanuvchilar soni: {len(users)}")
+        users = await db.get_all_users_with_reminder_time()
 
-        for user in users:
-            user_id = user[0]
+        for user_id, reminder_time, last_sent in users:
+            reminder_time = reminder_time or "05:00"
+
+            # Foydalanuvchining o'z vaqti hozirgi daqiqaga to'g'ri kelmasa - o'tkazib yuboramiz
+            if reminder_time != current_hm:
+                continue
+
+            # Bugun allaqachon yuborilgan bo'lsa - qayta yubormaymiz
+            if last_sent == today_str:
+                continue
+
             try:
                 workplaces = await db.get_user_workplaces(user_id)
 
                 if not workplaces:
                     # Ishxona yo'q bo'lsa - eski usulda so'ramaymiz, o'tkazib yuboramiz
+                    await db.set_last_reminder_date(user_id, today_str)
                     continue
 
                 workplace_id = workplaces[0][0]
@@ -85,12 +95,11 @@ async def send_morning_reminder(bot: Bot):
                         reply_markup=kbd.daily_report_inline()
                     )
 
-                print(f"[REMINDER] Xabar yuborildi: user_id={user_id}")
+                await db.set_last_reminder_date(user_id, today_str)
+                print(f"[REMINDER] Xabar yuborildi: user_id={user_id} vaqt={reminder_time}")
             except Exception as e:
                 print(f"[ERROR] Foydalanuvchiga yuborib bo'lmadi user_id={user_id}: {e}")
                 continue
-
-        print(f"[REMINDER] Barcha xabarlar yuborildi!")
 
     except Exception as e:
         print(f"[ERROR] Eslatma yuborishda xato: {e}")
@@ -110,17 +119,17 @@ async def main():
     dp.include_router(hd_workplace.router)  # Yangi workplace router
     dp.include_router(hd.router)  # Eski router (fallback)
 
-    # Scheduler (Koreya vaqti bilan 05:00)
+    # Scheduler (Koreya vaqti bilan) - HAR DAQIQADA tekshiradi, chunki endi
+    # har bir foydalanuvchi o'z eslatma vaqtini o'zi belgilaydi (profilda)
     scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
-    scheduler.add_job(send_morning_reminder, "cron", hour=5, minute=0, args=[bot])
+    scheduler.add_job(send_morning_reminder, "cron", minute="*", args=[bot])
     scheduler.start()
 
     print("=" * 50)
     print("🤖 봇이 시작되었습니다 (Korea Time Zone)")
     print("=" * 50)
     print(f"📅 현재 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"⏰ 알림 시간: 매일 오전 5시")
-    print(f"🔔 다음 알림: {scheduler.get_jobs()[0].next_run_time}")
+    print(f"⏰ 알림: 각 사용자가 프로필에서 설정한 시간에 개별 발송 (매분 확인)")
     print("=" * 50)
 
     try:

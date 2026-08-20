@@ -114,7 +114,9 @@ async def show_workplace_report(callback: CallbackQuery, workplace_id: int = Non
     month = now.month
 
     logs = await db.get_monthly_logs_by_workplace(user_id, workplace_id, year, month)
+    # logs: [(work_date, hours, note), ...]
     work_dict = {log[0]: log[1] for log in logs}
+    notes_dict = {log[0]: log[2] for log in logs if len(log) > 2 and log[2]}
 
     hourly_rate, tax_rate = await db.get_user_settings(user_id)
     total_hours = sum([log[1] for log in logs if log[1] > 0])
@@ -122,13 +124,14 @@ async def show_workplace_report(callback: CallbackQuery, workplace_id: int = Non
     tax = gross * (tax_rate / 100)
     net = gross - tax
 
-    # Rasm yaratish
+    # Rasm yaratish (eslatmalar bilan birga)
     image = await create_calendar_image(
         workplace_name, month, year, 
         work_dict, total_hours, gross, tax, net,
         hourly_rate, tax_rate,
         first_name=callback.from_user.first_name,
-        last_name=callback.from_user.last_name
+        last_name=callback.from_user.last_name,
+        notes_dict=notes_dict
     )
 
     # Eski xabarni o'chirish

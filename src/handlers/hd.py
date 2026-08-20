@@ -5,10 +5,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import aiosqlite
 import calendar
+import re
 from datetime import datetime, timedelta
 from src.database import db
 from src.keyboards import kbd
 from src.utils.state_filters import is_free_text
+from src.utils.text_parser import parse_hours_and_note
 
 router = Router()
 
@@ -19,6 +21,7 @@ class Form(StatesGroup):
     daily_manual_input = State()
     edit_manual_workplace_day = State()
     edit_schedule_manual = State()  # YANGI: 근무요일 수정 ichida qo'lda soat kiritish
+    edit_reminder_time = State()    # YANGI: ertalabki eslatma vaqtini qo'lda kiritish
 
 # ===== HELPER FUNKSIYA =====
 async def safe_edit_or_answer(callback, text, reply_markup=None, parse_mode=None):
@@ -34,6 +37,28 @@ async def safe_edit_or_answer(callback, text, reply_markup=None, parse_mode=None
 def get_weekday_korean(date_obj):
     weekdays = ["월", "화", "수", "목", "금", "토", "일"]
     return weekdays[date_obj.weekday()]
+
+def parse_time_string(text):
+    """'05:00', '5:00', '5.00', '5 00' kabi kiritilgan matnni HH:MM formatiga keltiradi.
+    Noto'g'ri bo'lsa None qaytaradi."""
+    text = text.strip().replace('.', ':').replace(' ', '')
+    match = re.match(r'^(\d{1,2}):(\d{2})$', text)
+    if not match:
+        # Faqat soat kiritilgan bo'lishi mumkin, masalan "6"
+        match2 = re.match(r'^(\d{1,2})$', text)
+        if match2:
+            hour = int(match2.group(1))
+            minute = 0
+        else:
+            return None
+    else:
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+
+    if hour > 23 or minute > 59:
+        return None
+
+    return f"{hour:02d}:{minute:02d}"
 
 # --- START ---
 @router.message(F.text == "/start")
@@ -61,6 +86,7 @@ async def show_settings(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     user_id = callback.from_user.id
     name, hourly_rate, tax_rate, work_days = await db.get_user_full_info(user_id)
+    reminder_time = await db.get_user_reminder_time(user_id)
 
     text = f"""👤 프로필
 
@@ -69,6 +95,7 @@ async def show_settings(callback: CallbackQuery, state: FSMContext):
 💰 시급: {hourly_rate:,}원
 📉 세금: {tax_rate}%
 📅 근무요일: {work_days if work_days else '설정되지 않음'}
+⏰ 알림 시간: {reminder_time}
 ━━━━━━━━━━━━━━━
 
 수정할 항목을 선택하세요:"""
@@ -115,6 +142,56 @@ async def process_edit_tax(message: Message, state: FSMContext):
         await state.clear()
     except ValueError:
         await message.answer("❌ 올바른 숫자를 입력해주세요.")
+
+# --- YANGI: 알림 시간 수정 (har bir foydalanuvchi o'zi belgilaydi) ---
+@router.callback_query(F.data == "edit_reminder_time")
+async def edit_reminder_time_start(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await state.clear()
+    user_id = callback.from_user.id
+    current = await db.get_user_reminder_time(user_id)
+
+    await safe_edit_or_answer(
+        callback,
+        f"⏰ 알림 시간 설정\n\n현재 알림 시간: {current}\n\n매일 아침 몇 시에 알림을 받으시겠어요?\n아래에서 선택하거나 직접 입력하세요:",
+        reply_markup=kbd.reminder_time_inline()
+    )
+
+@router.callback_query(F.data.startswith("set_reminder_"))
+async def set_reminder_quick(callback: CallbackQuery, state: FSMContext):
+    time_str = callback.data.replace("set_reminder_", "")
+    user_id = callback.from_user.id
+
+    await db.update_user_reminder_time(user_id, time_str)
+    await callback.answer(f"✅ 알림 시간이 {time_str}으로 설정되었습니다!")
+
+    await safe_edit_or_answer(
+        callback,
+        f"✅ 알림 시간이 {time_str}으로 설정되었습니다!\n\n매일 이 시간에 근무 확인 알림을 보내드릴게요.",
+        reply_markup=kbd.settings_inline()
+    )
+
+@router.callback_query(F.data == "reminder_manual")
+async def reminder_manual_start(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await callback.message.answer("⌨️ 알림 시간을 입력하세요 (예: 06:30, 21:00):")
+    await state.set_state(Form.edit_reminder_time)
+
+@router.message(Form.edit_reminder_time, is_free_text)
+async def process_reminder_manual(message: Message, state: FSMContext):
+    time_str = parse_time_string(message.text)
+    if not time_str:
+        await message.answer("❌ 올바른 형식으로 입력해주세요 (예: 06:30, 21:00):")
+        return
+
+    user_id = message.from_user.id
+    await db.update_user_reminder_time(user_id, time_str)
+
+    await message.answer(
+        f"✅ 알림 시간이 {time_str}으로 설정되었습니다!\n\n매일 이 시간에 근무 확인 알림을 보내드릴게요.",
+        reply_markup=kbd.main_menu_inline()
+    )
+    await state.clear()
 
 # --- YANGI: 근무요일 수정 (kun + soat birga) ---
 @router.callback_query(F.data == "edit_workdays")
@@ -354,15 +431,8 @@ async def save_hours(callback: CallbackQuery):
     user_id = callback.from_user.id
     work_date = datetime.now().strftime(f"%Y-%m-{int(day):02d}")
 
-    async with aiosqlite.connect(db.DB_PATH) as conn:
-        await conn.execute("""
-            INSERT INTO work_logs (user_id, workplace_id, work_date, hours) 
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(user_id, work_date) DO UPDATE SET 
-                workplace_id = excluded.workplace_id,
-                hours = excluded.hours
-        """, (user_id, workplace_id, work_date, hours_float))
-        await conn.commit()
+    # Tugma orqali tanlangan qiymat - eslatmasiz saqlanadi
+    await db.save_work_log_with_workplace(user_id, workplace_id, work_date, hours_float, note='')
 
     if hours_float == 0:
         await callback.answer(f"✅ {day}일 휴무로 저장되었습니다!")
@@ -379,38 +449,42 @@ async def manual_input_start(callback: CallbackQuery, state: FSMContext):
     workplace_id = int(parts[2])
     day = parts[3]
     await state.update_data(workplace_id=workplace_id, editing_day=day)
-    await callback.message.answer(f"⌨️ {day}일 근무 시간을 입력해주세요 (예: 9.5):")
+    await callback.message.answer(
+        f"⌨️ {day}일 근무 시간을 입력해주세요.\n\n"
+        f"예: 9.5\n"
+        f"또는 짧은 메모와 함께: \"9시간 근무, 급여는 미리 받음\"\n"
+        f"(문장 속 숫자를 시간으로 인식하고, 나머지 내용은 메모로 저장됩니다)"
+    )
     await state.set_state(Form.edit_manual_workplace_day)
 
 @router.message(Form.edit_manual_workplace_day, is_free_text)
 async def process_manual_input(message: Message, state: FSMContext):
-    try:
-        data = await state.get_data()
-        workplace_id = data.get("workplace_id")
-        day = data.get("editing_day")
-        hours = float(message.text.replace(',', '.'))
+    hours, note = parse_hours_and_note(message.text)
 
-        if hours < 0 or hours > 24:
-            await message.answer("❌ 0-24 사이의 시간을 입력해주세요.")
-            return
+    if hours is None:
+        await message.answer("❌ 시간을 숫자로 포함해서 입력해주세요 (예: 9 또는 \"9시간, 급여는 미리 받음\").")
+        return
 
-        user_id = message.from_user.id
-        work_date = datetime.now().strftime(f"%Y-%m-{int(day):02d}")
+    if hours < 0 or hours > 24:
+        await message.answer("❌ 0-24 사이의 시간을 입력해주세요.")
+        return
 
-        async with aiosqlite.connect(db.DB_PATH) as conn:
-            await conn.execute("""
-                INSERT INTO work_logs (user_id, workplace_id, work_date, hours) 
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(user_id, work_date) DO UPDATE SET 
-                    workplace_id = excluded.workplace_id,
-                    hours = excluded.hours
-            """, (user_id, workplace_id, work_date, hours))
-            await conn.commit()
+    data = await state.get_data()
+    workplace_id = data.get("workplace_id")
+    day = data.get("editing_day")
+    user_id = message.from_user.id
+    work_date = datetime.now().strftime(f"%Y-%m-{int(day):02d}")
 
+    await db.save_work_log_with_workplace(user_id, workplace_id, work_date, hours, note or '')
+
+    if note:
+        await message.answer(
+            f"✅ {day}일 {hours}시간 저장완료!\n📝 메모: {note}",
+            reply_markup=kbd.main_menu_inline()
+        )
+    else:
         await message.answer(f"✅ {day}일 {hours}시간 저장완료!", reply_markup=kbd.main_menu_inline())
-        await state.clear()
-    except ValueError:
-        await message.answer("❌ 숫자만 입력해주세요.")
+    await state.clear()
 
 # --- DEFAULT HOLATGA QAYTARISH ---
 @router.callback_query(F.data.startswith("clear_"))
@@ -443,7 +517,7 @@ async def view_report(callback: CallbackQuery):
 
     async with aiosqlite.connect(db.DB_PATH) as conn:
         async with conn.execute(
-            "SELECT work_date, hours FROM work_logs WHERE user_id = ? AND work_date LIKE ? ORDER BY work_date ASC",
+            "SELECT work_date, hours, note FROM work_logs WHERE user_id = ? AND work_date LIKE ? ORDER BY work_date ASC",
             (user_id, f"{current_month}%")
         ) as c:
             rows = await c.fetchall()
@@ -459,7 +533,7 @@ async def view_report(callback: CallbackQuery):
         report_lines = [f"📅 {now.month}월 근무 상세 기록\n"]
         total_month_hours = 0
 
-        for date_str, hours in rows:
+        for date_str, hours, note in rows:
             day_only = date_str.split('-')[-1]
             date_obj = datetime.strptime(date_str, '%Y-%m-%d')
             weekday = get_weekday_korean(date_obj)
@@ -469,6 +543,9 @@ async def view_report(callback: CallbackQuery):
             else:
                 report_lines.append(f"▫️ {day_only}일 ({weekday}): {hours}시간")
                 total_month_hours += hours
+
+            if note:
+                report_lines.append(f"    📝 {note}")
 
         gross_pay = total_month_hours * hourly_rate
         tax_amount = gross_pay * (tax_rate / 100)
@@ -483,13 +560,17 @@ async def view_report(callback: CallbackQuery):
 
     await safe_edit_or_answer(callback, text, reply_markup=kbd.main_menu_inline())
 
-# --- KUNLIK AVTOMATIK SO'ROV (soat 05:00 da) - fallback (ma'lumot mavjud bo'lmaganda) ---
+# --- KUNLIK AVTOMATIK SO'ROV (foydalanuvchi o'zi belgilagan vaqtda) - fallback (ma'lumot mavjud bo'lmaganda) ---
 @router.callback_query(F.data.startswith("daily_report_"))
 async def process_daily_report(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
 
     if parts[-1] == "manual":
-        await callback.message.answer("⌨️ 오늘 근무 시간을 입력해주세요 (예: 10.5):")
+        await callback.message.answer(
+            "⌨️ 오늘 근무 시간을 입력해주세요.\n\n"
+            "예: 10.5\n"
+            "또는 짧은 메모와 함께: \"9시간 근무, 급여는 미리 받음\""
+        )
         await state.set_state(Form.daily_manual_input)
         return
 
@@ -523,34 +604,41 @@ async def process_daily_report(callback: CallbackQuery, state: FSMContext):
 
 @router.message(Form.daily_manual_input, is_free_text)
 async def process_daily_manual(message: Message, state: FSMContext):
-    try:
-        hours = float(message.text.replace(',', '.'))
+    hours, note = parse_hours_and_note(message.text)
 
-        if hours < 0 or hours > 24:
-            await message.answer("❌ 0-24 사이의 시간을 입력해주세요.")
-            return
+    if hours is None:
+        await message.answer("❌ 시간을 숫자로 포함해서 입력해주세요 (예: 10.5 또는 \"9시간, 급여는 미리 받음\").")
+        return
 
-        user_id = message.from_user.id
+    if hours < 0 or hours > 24:
+        await message.answer("❌ 0-24 사이의 시간을 입력해주세요.")
+        return
 
-        from datetime import datetime as dt
-        import pytz
+    user_id = message.from_user.id
 
-        seoul_tz = pytz.timezone("Asia/Seoul")
-        today = dt.now(seoul_tz)
-        work_date = today.strftime("%Y-%m-%d")
+    from datetime import datetime as dt
+    import pytz
 
-        workplaces = await db.get_user_workplaces(user_id)
-        workplace_id = workplaces[0][0] if workplaces else 1
+    seoul_tz = pytz.timezone("Asia/Seoul")
+    today = dt.now(seoul_tz)
+    work_date = today.strftime("%Y-%m-%d")
 
-        await db.save_work_log_with_workplace(user_id, workplace_id, work_date, hours)
+    workplaces = await db.get_user_workplaces(user_id)
+    workplace_id = workplaces[0][0] if workplaces else 1
 
+    await db.save_work_log_with_workplace(user_id, workplace_id, work_date, hours, note or '')
+
+    if note:
+        await message.answer(
+            f"✅ 오늘 ({today.month}월 {today.day}일) {hours}시간이 저장되었습니다!\n📝 메모: {note}",
+            reply_markup=kbd.main_menu_inline()
+        )
+    else:
         await message.answer(
             f"✅ 오늘 ({today.month}월 {today.day}일) {hours}시간이 저장되었습니다!",
             reply_markup=kbd.main_menu_inline()
         )
-        await state.clear()
-    except ValueError:
-        await message.answer("❌ 숫자만 입력해주세요.")
+    await state.clear()
 
 # --- YANGI: KUNLIK TASDIQLASH (jadval bo'yicha oldindan to'ldirilgan bo'lsa) ---
 @router.callback_query(F.data.startswith("daily_confirm_"))
@@ -582,6 +670,7 @@ async def user_info(message: Message, state: FSMContext):
     username = message.from_user.username or "없음"
     full_name = message.from_user.full_name
     name, hourly_rate, tax_rate, work_days = await db.get_user_full_info(user_id)
+    reminder_time = await db.get_user_reminder_time(user_id)
     now = datetime.now()
     current_month = now.strftime('%Y-%m')
 
@@ -601,6 +690,7 @@ async def user_info(message: Message, state: FSMContext):
 💰 시급: {hourly_rate:,}원
 📉 세금: {tax_rate}%
 📅 근무요일: {work_days if work_days else '설정되지 않음'}
+⏰ 알림 시간: {reminder_time}
 ━━━━━━━━━━━━━━━
 
 📊 이번 달

@@ -14,6 +14,8 @@ ADMIN_USER_ID = 5830567800  # <-- BU YERGA O'ZGARTIRING!
 
 WEEKDAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"]
 
+DEFAULT_REMINDER_TIME = "05:00"
+
 async def init_db():
     """Bazani va jadvallarni yaratish"""
     async with aiosqlite.connect(DB_PATH) as conn:
@@ -53,6 +55,25 @@ async def init_db():
         # weekly_schedule ustunini qo'shish (kun -> soat JSON, masalan {"월":10,"화":0,...})
         try:
             await conn.execute("ALTER TABLE users ADD COLUMN weekly_schedule TEXT DEFAULT '{}'")
+        except:
+            pass  # Ustun allaqachon mavjud
+
+        # YANGI: note ustuni - foydalanuvchi qo'lda kiritganda erkin matn/eslatma qoldirishi uchun
+        # (masalan: "9 soat lekin oldindan pul oldim")
+        try:
+            await conn.execute("ALTER TABLE work_logs ADD COLUMN note TEXT DEFAULT ''")
+        except:
+            pass  # Ustun allaqachon mavjud
+
+        # YANGI: har bir foydalanuvchi ertalabki eslatma vaqtini o'zi belgilashi uchun
+        try:
+            await conn.execute(f"ALTER TABLE users ADD COLUMN reminder_time TEXT DEFAULT '{DEFAULT_REMINDER_TIME}'")
+        except:
+            pass  # Ustun allaqachon mavjud
+
+        # YANGI: bir kunda faqat bitta marta eslatma yuborilishini nazorat qilish uchun
+        try:
+            await conn.execute("ALTER TABLE users ADD COLUMN last_reminder_date TEXT DEFAULT ''")
         except:
             pass  # Ustun allaqachon mavjud
 
@@ -269,18 +290,18 @@ async def get_workplace_name(workplace_id):
             return result[0] if result else "알 수 없음"
 
 async def get_monthly_logs_by_workplace(user_id, workplace_id, year, month):
-    """Ishxona bo'yicha oylik ma'lumotlar"""
+    """Ishxona bo'yicha oylik ma'lumotlar (sana, soat, eslatma)"""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
-            SELECT work_date, hours FROM work_logs
+            SELECT work_date, hours, note FROM work_logs
             WHERE user_id = ? AND workplace_id = ?
             AND work_date LIKE ?
             ORDER BY work_date
         """, (user_id, workplace_id, f"{year}-{month:02d}%")) as cursor:
             return await cursor.fetchall()
 
-async def save_work_log_with_workplace(user_id, workplace_id, work_date, hours):
-    """Ishxona bilan birga log saqlash"""
+async def save_work_log_with_workplace(user_id, workplace_id, work_date, hours, note=''):
+    """Ishxona bilan birga log saqlash (ixtiyoriy eslatma matni bilan)"""
     async with aiosqlite.connect(DB_PATH) as db:
         # Avval mavjud yozuvni o'chirish (agar boshqa workplace_id bo'lsa)
         await db.execute("""
@@ -290,12 +311,13 @@ async def save_work_log_with_workplace(user_id, workplace_id, work_date, hours):
 
         # Keyin yangi yoki yangilangan yozuvni qo'shish
         await db.execute("""
-            INSERT INTO work_logs (user_id, workplace_id, work_date, hours)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO work_logs (user_id, workplace_id, work_date, hours, note)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(user_id, work_date) DO UPDATE SET 
                 workplace_id = excluded.workplace_id,
-                hours = excluded.hours
-        """, (user_id, workplace_id, work_date, hours))
+                hours = excluded.hours,
+                note = excluded.note
+        """, (user_id, workplace_id, work_date, hours, note or ''))
         await db.commit()
 
 async def delete_workplace(workplace_id):
@@ -391,3 +413,47 @@ async def get_all_monthly_summaries(user_id, workplace_id):
             ORDER BY ym DESC
         """, (user_id, workplace_id)) as cursor:
             return await cursor.fetchall()
+
+# ===================== YANGI: HAR BIR FOYDALANUVCHI UCHUN ERTALABKI ESLATMA VAQTI =====================
+
+async def get_user_reminder_time(user_id):
+    """Foydalanuvchining o'zi belgilagan ertalabki eslatma vaqtini olish (HH:MM), default 05:00"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT reminder_time FROM users WHERE user_id = ?",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row or not row[0]:
+                return DEFAULT_REMINDER_TIME
+            return row[0]
+
+async def update_user_reminder_time(user_id, time_str):
+    """Foydalanuvchining ertalabki eslatma vaqtini yangilash (yoki user yo'q bo'lsa yaratish)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            exists = await cursor.fetchone()
+        if not exists:
+            await db.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
+        await db.execute(
+            "UPDATE users SET reminder_time = ? WHERE user_id = ?",
+            (time_str, user_id)
+        )
+        await db.commit()
+
+async def get_all_users_with_reminder_time():
+    """Scheduler uchun: faol foydalanuvchilar, ularning eslatma vaqti va oxirgi yuborilgan sana"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT user_id, reminder_time, last_reminder_date FROM users WHERE is_active = 1"
+        ) as cursor:
+            return await cursor.fetchall()
+
+async def set_last_reminder_date(user_id, date_str):
+    """Foydalanuvchiga bugun eslatma yuborilganini belgilash (takroriy yubormaslik uchun)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET last_reminder_date = ? WHERE user_id = ?",
+            (date_str, user_id)
+        )
+        await db.commit()
