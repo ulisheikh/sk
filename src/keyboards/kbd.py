@@ -8,7 +8,7 @@ def main_reply_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="/start")],
-            [KeyboardButton(text="내 정보")]
+            [KeyboardButton(text="프로필")]
         ],
         resize_keyboard=True
     )
@@ -28,13 +28,11 @@ def report_actions_inline():
     builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
     return builder.as_markup()
 
-# 1b. Oylarni tanlash (월별 전체 보기)
+# 1b. Oylarni tanlash (eski, hozirda 월별 전체 보기 to'g'ridan-to'g'ri matn ko'rinishida)
 def select_any_month_inline():
-    from datetime import datetime
     builder = InlineKeyboardBuilder()
     now = datetime.now()
-    
-    # Oxirgi 12 oy
+
     for i in range(12):
         month_date = datetime(now.year, now.month, 1) - timedelta(days=30*i)
         month_text = month_date.strftime("%Y년 %m월")
@@ -42,7 +40,7 @@ def select_any_month_inline():
             text=month_text,
             callback_data=f"viewmonth_{month_date.year}_{month_date.month}"
         )
-    
+
     builder.adjust(3)
     builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
     return builder.as_markup()
@@ -62,143 +60,166 @@ def settings_inline():
     builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
     return builder.as_markup()
 
-# 3. Hafta kunlarini tanlash
-def weekdays_inline(selected_days_list):
+# 3. YANGI: Hafta kunlari + har bir kun uchun soat birga tanlanadi
+def schedule_editor_inline(schedule: dict):
+    """
+    Har bir kun uchun: [월 ✅ (10.0h)] qatori,
+    agar kun yoqilgan bo'lsa - tagida [10시간][10.5시간][11시간][⌨️] qatori chiqadi.
+    """
     days = ["월", "화", "수", "목", "금", "토", "일"]
     builder = InlineKeyboardBuilder()
+
     for d in days:
-        status = "✅" if d in selected_days_list else "❌"
-        builder.button(text=f"{d} {status}", callback_data=f"toggle_day_{d}")
-    builder.adjust(4, 3)
-    builder.row(InlineKeyboardButton(text="💾 저장 완료", callback_data="save_settings"))
+        hours = schedule.get(d, 0)
+
+        if hours and hours > 0:
+            hours_display = int(hours) if hours == int(hours) else hours
+            label = f"{d} ✅ ({hours_display}h)"
+        else:
+            label = f"{d} ❌"
+
+        builder.row(InlineKeyboardButton(text=label, callback_data=f"wd_toggle_{d}"))
+
+        if hours and hours > 0:
+            row_buttons = []
+            for h in [10, 10.5, 11]:
+                mark = "🔹" if hours == h else ""
+                row_buttons.append(InlineKeyboardButton(
+                    text=f"{mark}{h}시간",
+                    callback_data=f"wd_hours_{d}_{h}"
+                ))
+            row_buttons.append(InlineKeyboardButton(text="⌨️ 직접", callback_data=f"wd_manual_{d}"))
+            builder.row(*row_buttons)
+
+    builder.row(InlineKeyboardButton(text="💾 저장 완료 (이번 달 자동 반영)", callback_data="wd_save"))
     builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
+
     return builder.as_markup()
 
-# 4. Kunlarni tahrirlash - KALENDAR ko'rinishda
+# 4. Kunlik so'rov uchun: mavjud belgilangan ma'lumotni tasdiqlash
+def daily_confirm_inline(workplace_id, work_date):
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✅ 맞습니다", callback_data=f"daily_confirm_{workplace_id}_{work_date}"),
+        InlineKeyboardButton(text="✏️ 변경하기", callback_data=f"daily_change_{workplace_id}_{work_date}")
+    )
+    return builder.as_markup()
+
+# 5. Kunlarni tahrirlash - KALENDAR ko'rinishda (eski, hali ham mavjud)
 def edit_days_inline(workplace_id):
     """Oyning kunlarini hafta kunlari bilan kalendar ko'rinishida"""
     builder = InlineKeyboardBuilder()
-    
+
     now = datetime.now()
     year = now.year
     month = now.month
-    
-    # Hafta kunlari sarlavhasi
+
     weekday_headers = ["월", "화", "수", "목", "금", "토", "일"]
     for header in weekday_headers:
         builder.button(text=header, callback_data="ignore")
     builder.adjust(7)
-    
-    # Oyning birinchi kunini topish
+
     first_day = datetime(year, month, 1)
-    # Python: Monday=0, Sunday=6; Biz: Monday=0, Sunday=6
-    weekday = first_day.weekday()  # 0=Mon, 6=Sun
-    
-    # Oyning kunlar soni
+    weekday = first_day.weekday()
+
     days_in_month = calendar.monthrange(year, month)[1]
-    
-    # Bo'sh joylar (oy boshlanishidan oldin)
+
     buttons = []
     for _ in range(weekday):
         buttons.append(InlineKeyboardButton(text=" ", callback_data="ignore"))
-    
-    # Kunlarni qo'shish
+
     current_day = now.day
     for day in range(1, days_in_month + 1):
         if day == current_day:
             text = f" 🔹{day}"
         else:
             text = str(day)
-        
+
         buttons.append(InlineKeyboardButton(
             text=text, 
             callback_data=f"edit_day_{workplace_id}_{day}"
         ))
-    
-    # 7 tadan guruplash (hafta bo'yicha)
+
+    # Oxirgi qatorni 7 ustunga to'liq to'ldirish (ustunlar siljib ketmasligi uchun)
+    remainder = len(buttons) % 7
+    if remainder != 0:
+        for _ in range(7 - remainder):
+            buttons.append(InlineKeyboardButton(text=" ", callback_data="ignore"))
+
     for i in range(0, len(buttons), 7):
         builder.row(*buttons[i:i+7])
-    
-    # Orqaga qaytish
+
     builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
-    
+
     return builder.as_markup()
 
-# 5. Soatlarni tanlash - 휴무 bilan
-# 5. Soatlarni tanlash - 휴무 bilan
+# 6. Soatlarni tanlash - 휴무 bilan
 def select_hours_inline(day, workplace_id):
     """Soat variantlari va dam olish kuni"""
     builder = InlineKeyboardBuilder()
-    
-    # 휴무 (Dam olish) tugmasi
+
     builder.row(InlineKeyboardButton(text="🏖 휴무", callback_data=f"save_{workplace_id}_{day}_0"))
-    
-    # Standart soatlar
+
     standard_hours = [10, 10.5, 11]
     for hours in standard_hours:
         builder.button(
             text=f"{hours}시간", 
             callback_data=f"save_{workplace_id}_{day}_{hours}"
         )
-    
+
     builder.adjust(3)
-    
-    # Qo'lda kiritish
+
     builder.row(
         InlineKeyboardButton(text="⌨️ 직접 입력", callback_data=f"manual_edit_{workplace_id}_{day}")
     )
-    
-    # YANGI: Default holatga qaytarish
+
     builder.row(
         InlineKeyboardButton(text="🔄 기록 삭제", callback_data=f"clear_{workplace_id}_{day}")
     )
-    
+
     builder.row(
         InlineKeyboardButton(text="⬅️ 뒤로", callback_data=f"edit_logs_{workplace_id}")
     )
-    
+
     return builder.as_markup()
 
-# 6. Kunlik so'rov - soat 05:00 da
+# 7. Kunlik so'rov - soat 05:00 da (mavjud ma'lumot bo'lmaganda fallback)
 def daily_report_inline():
     """Har kuni 05:00 da so'raladigan inline menu"""
     builder = InlineKeyboardBuilder()
-    
-    # 휴무 tugmasi
+
     builder.row(InlineKeyboardButton(text="🏖 휴무", callback_data="daily_report_0"))
-    
-    # Standart soatlar
+
     standard_hours = [10, 10.5, 11]
     for hours in standard_hours:
         builder.button(
             text=f"{hours}시간", 
             callback_data=f"daily_report_{hours}"
         )
-    
+
     builder.adjust(3)
-    
-    # Qo'lda kiritish
+
     builder.row(
         InlineKeyboardButton(text="⌨️ 직접 입력", callback_data="daily_report_manual")
     )
-    
+
     return builder.as_markup()
 
-# 7. Tasdiqlash
+# 8. Tasdiqlash
 def confirm_inline(action, value=None):
     """Umumiy tasdiqlash tugmalari"""
     builder = InlineKeyboardBuilder()
-    
+
     if value:
         callback_yes = f"confirm_{action}_{value}"
     else:
         callback_yes = f"confirm_{action}"
-    
+
     builder.row(
         InlineKeyboardButton(text="✅ 예", callback_data=callback_yes),
         InlineKeyboardButton(text="❌ 아니오", callback_data="main_menu")
     )
-    
+
     return builder.as_markup()
 
 # Faqat +ADD tugmasi
@@ -273,12 +294,11 @@ def workplace_actions_inline(workplace_id):
     builder.row(InlineKeyboardButton(text="⬅️ 뒤로", callback_data="my_workplaces"))
     return builder.as_markup()
 
-# Oylarni tanlash (ishxona bo'yicha)
+# Oylarni tanlash (ishxona bo'yicha) - eski, endi ishlatilmaydi lekin xatolik chiqmasligi uchun qoldirilgan
 def select_month_inline(workplace_id):
-    from datetime import datetime, timedelta
     builder = InlineKeyboardBuilder()
     now = datetime.now()
-    
+
     for i in range(12):
         month_date = datetime(now.year, now.month, 1) - timedelta(days=30*i)
         month_text = month_date.strftime("%Y년 %m월")
@@ -286,7 +306,7 @@ def select_month_inline(workplace_id):
             text=month_text,
             callback_data=f"viewmonth_{workplace_id}_{month_date.year}_{month_date.month}"
         )
-    
+
     builder.adjust(3)
     builder.row(InlineKeyboardButton(text="⬅️ 뒤로", callback_data=f"monthly_wp_{workplace_id}"))
     return builder.as_markup()

@@ -1,11 +1,16 @@
 import aiosqlite
 import os
+import json
+import calendar as cal
+from datetime import datetime
 
 # Baza fayli manzili
 DB_PATH = "database.db"
 
 # ADMIN USER ID - BU YERGA O'Z TELEGRAM ID INGIZNI KIRITING!
 ADMIN_USER_ID = 5830567800  # <-- BU YERGA O'ZGARTIRING!
+
+WEEKDAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"]
 
 async def init_db():
     """Bazani va jadvallarni yaratish"""
@@ -24,7 +29,7 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         # Work_logs jadvali
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS work_logs (
@@ -36,13 +41,19 @@ async def init_db():
                 UNIQUE(user_id, work_date) 
             )
         """)
-        
+
         # workplace_id ustunini qo'shish (agar yo'q bo'lsa)
         try:
             await conn.execute("ALTER TABLE work_logs ADD COLUMN workplace_id INTEGER DEFAULT 1")
         except:
             pass  # Ustun allaqachon mavjud
-        
+
+        # weekly_schedule ustunini qo'shish (kun -> soat JSON, masalan {"월":10,"화":0,...})
+        try:
+            await conn.execute("ALTER TABLE users ADD COLUMN weekly_schedule TEXT DEFAULT '{}'")
+        except:
+            pass  # Ustun allaqachon mavjud
+
         # Workplaces jadvali
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS workplaces (
@@ -52,7 +63,7 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         # Admin actions log (audit)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS admin_actions (
@@ -64,7 +75,7 @@ async def init_db():
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         await conn.commit()
 
 def is_admin(user_id):
@@ -76,7 +87,7 @@ async def is_user_active(user_id):
     # Admin har doim faol
     if is_admin(user_id):
         return True
-    
+
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             "SELECT is_active FROM users WHERE user_id = ?",
@@ -115,7 +126,7 @@ async def update_user_info(user_id, full_name=None, username=None):
             (user_id,)
         ) as cursor:
             exists = await cursor.fetchone()
-        
+
         if exists:
             # Update qilamiz
             await db.execute(
@@ -143,9 +154,8 @@ async def get_all_users():
 async def get_user_stats(user_id, month=None):
     """Foydalanuvchining oylik statistikasi"""
     if month is None:
-        from datetime import datetime
         month = datetime.now().strftime('%Y-%m')
-    
+
     async with aiosqlite.connect(DB_PATH) as db:
         # Jami soatlar
         async with db.execute("""
@@ -154,7 +164,7 @@ async def get_user_stats(user_id, month=None):
         """, (user_id, f"{month}%")) as cursor:
             result = await cursor.fetchone()
             total_hours = result[0] if result[0] else 0
-        
+
         # Sozlamalar
         async with db.execute("""
             SELECT hourly_rate, tax_rate FROM users WHERE user_id = ?
@@ -162,12 +172,12 @@ async def get_user_stats(user_id, month=None):
             settings = await cursor.fetchone()
             hourly_rate = settings[0] if settings else 12500
             tax_rate = settings[1] if settings else 3.3
-        
+
         # Hisob-kitoblar
         gross_pay = total_hours * hourly_rate
         tax_amount = gross_pay * (tax_rate / 100)
         net_pay = gross_pay - tax_amount
-        
+
         return {
             'total_hours': total_hours,
             'hourly_rate': hourly_rate,
@@ -275,7 +285,7 @@ async def save_work_log_with_workplace(user_id, workplace_id, work_date, hours):
             DELETE FROM work_logs 
             WHERE user_id = ? AND work_date = ? AND workplace_id != ?
         """, (user_id, work_date, workplace_id))
-        
+
         # Keyin yangi yoki yangilangan yozuvni qo'shish
         await db.execute("""
             INSERT INTO work_logs (user_id, workplace_id, work_date, hours)
@@ -301,3 +311,81 @@ async def delete_workplace(workplace_id):
         )
         await db.commit()
 
+# ===================== YANGI: HAFTALIK JADVAL (KUN + SOAT) =====================
+
+async def get_user_schedule(user_id):
+    """Foydalanuvchining haftalik jadvalini olish: {"월": 10, "화": 0, ...}"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT weekly_schedule FROM users WHERE user_id = ?",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row or not row[0]:
+                return {}
+            try:
+                return json.loads(row[0])
+            except Exception:
+                return {}
+
+async def save_user_schedule(user_id, schedule: dict):
+    """Haftalik jadvalni saqlash (JSON) va work_days ustunini ham yangilash"""
+    work_days = ','.join([d for d in WEEKDAY_NAMES if schedule.get(d, 0) > 0])
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            exists = await cursor.fetchone()
+        if not exists:
+            await db.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
+        await db.execute(
+            "UPDATE users SET weekly_schedule = ?, work_days = ? WHERE user_id = ?",
+            (json.dumps(schedule, ensure_ascii=False), work_days, user_id)
+        )
+        await db.commit()
+
+async def fill_month_from_schedule(user_id, workplace_id, schedule: dict, year=None, month=None):
+    """Haftalik jadval asosida butun oyni oldindan to'ldirish"""
+    now = datetime.now()
+    year = year or now.year
+    month = month or now.month
+
+    days_in_month = cal.monthrange(year, month)[1]
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        for day in range(1, days_in_month + 1):
+            date_obj = datetime(year, month, day)
+            day_name = WEEKDAY_NAMES[date_obj.weekday()]
+            hours = schedule.get(day_name, 0)
+            work_date = date_obj.strftime("%Y-%m-%d")
+
+            await db.execute("""
+                INSERT INTO work_logs (user_id, workplace_id, work_date, hours)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, work_date) DO UPDATE SET 
+                    workplace_id = excluded.workplace_id,
+                    hours = excluded.hours
+            """, (user_id, workplace_id, work_date, hours))
+        await db.commit()
+
+async def get_log_hours(user_id, workplace_id, work_date):
+    """Aynan bir kun uchun soatni olish (mavjud bo'lmasa None qaytaradi)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT hours FROM work_logs WHERE user_id = ? AND workplace_id = ? AND work_date = ?",
+            (user_id, workplace_id, work_date)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+async def get_all_monthly_summaries(user_id, workplace_id):
+    """Berilgan ishxona bo'yicha barcha oylarning umumiy statistikasi (eng yangisidan eskisiga)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT substr(work_date, 1, 7) as ym,
+                   SUM(CASE WHEN hours > 0 THEN hours ELSE 0 END) as total_hours,
+                   SUM(CASE WHEN hours > 0 THEN 1 ELSE 0 END) as work_days_count
+            FROM work_logs
+            WHERE user_id = ? AND workplace_id = ?
+            GROUP BY ym
+            ORDER BY ym DESC
+        """, (user_id, workplace_id)) as cursor:
+            return await cursor.fetchall()
