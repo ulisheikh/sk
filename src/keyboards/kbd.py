@@ -60,41 +60,68 @@ def settings_inline():
     builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
     return builder.as_markup()
 
-# 3. YANGI: Hafta kunlari + har bir kun uchun soat birga tanlanadi
+# 3. Hafta kunlari + har bir kun uchun soat birga tanlanadi - KVADRAT GRID (7 qator x 4 ustun)
 def schedule_editor_inline(schedule: dict):
     """
-    Har bir kun uchun: [월 ✅ (10.0h)] qatori,
-    agar kun yoqilgan bo'lsa - tagida [10시간][10.5시간][11시간][⌨️] qatori chiqadi.
+    Sarlavha endi tugma emas - xabar matnida chiqadi (schedule_editor_header_text() ga qarang).
+    Har bir hafta kuni uchun BITTA qatorda 4 ta bir xil kenglikdagi tugma:
+    [ 월 ✅ ] [ 10 ] [ 10.5 ] [ ✏️ ]
+
+    Kun ustunida faqat kun nomi + ✅/❌ - soat yozilmaydi (soat alohida ustunlarda).
+    Agar kun ❌ (dam) bo'lsa - o'sha qatorda bo'sh (ko'rinmas) tugmalar qo'yiladi,
+    shunda kun tugmasi cho'zilib ketmaydi va boshqalar bilan bir xil kenglikda,
+    chap tomonda turadi.
     """
     days = ["월", "화", "수", "목", "금", "토", "일"]
     builder = InlineKeyboardBuilder()
 
     for d in days:
         hours = schedule.get(d, 0)
+        is_active = hours and hours > 0
 
-        if hours and hours > 0:
-            hours_display = int(hours) if hours == int(hours) else hours
-            label = f"{d} ✅ ({hours_display}h)"
+        # Kun ustunida endi soat ko'rsatilmaydi - faqat kun + holat
+        day_label = f"{d} ✅" if is_active else f"{d} ❌"
+        day_button = InlineKeyboardButton(text=day_label, callback_data=f"wd_toggle_{d}")
+
+        if is_active:
+            # Faol kun - 4 ta tugma bitta qatorda: [kun][10][10.5][✏️]
+            mark_10 = "🔹" if hours == 10 else ""
+            mark_105 = "🔹" if hours == 10.5 else ""
+
+            builder.row(
+                day_button,
+                InlineKeyboardButton(text=f"{mark_10}10", callback_data=f"wd_hours_{d}_10"),
+                InlineKeyboardButton(text=f"{mark_105}10.5", callback_data=f"wd_hours_{d}_10.5"),
+                InlineKeyboardButton(text="✏️", callback_data=f"wd_manual_{d}"),
+            )
         else:
-            label = f"{d} ❌"
-
-        builder.row(InlineKeyboardButton(text=label, callback_data=f"wd_toggle_{d}"))
-
-        if hours and hours > 0:
-            row_buttons = []
-            for h in [10, 10.5, 11]:
-                mark = "🔹" if hours == h else ""
-                row_buttons.append(InlineKeyboardButton(
-                    text=f"{mark}{h}시간",
-                    callback_data=f"wd_hours_{d}_{h}"
-                ))
-            row_buttons.append(InlineKeyboardButton(text="⌨️ 직접", callback_data=f"wd_manual_{d}"))
-            builder.row(*row_buttons)
+            # Dam kuni - bo'sh tugmalar bilan kenglikni bir xil ushlab turamiz
+            # (shunda kun tugmasi cho'zilib, o'rtaga surilib ketmaydi)
+            builder.row(
+                day_button,
+                InlineKeyboardButton(text=" ", callback_data="ignore"),
+                InlineKeyboardButton(text=" ", callback_data="ignore"),
+                InlineKeyboardButton(text=" ", callback_data="ignore"),
+            )
 
     builder.row(InlineKeyboardButton(text="💾 저장 완료 (이번 달 자동 반영)", callback_data="wd_save"))
     builder.row(InlineKeyboardButton(text="⬅️ 메인으로", callback_data="main_menu"))
 
     return builder.as_markup()
+
+
+# 3a. schedule_editor_inline bilan birga yuboriladigan sarlavha matni (parse_mode="HTML")
+def schedule_editor_header_text():
+    """
+    Klaviaturadan OLDIN xabar matni sifatida yuboriladigan sarlavha.
+    <pre> ichida bo'lgani uchun ustunlar tekis, bir-biridan ajralib turadi.
+    Handlerda: await message.answer(schedule_editor_header_text(), reply_markup=kbd.schedule_editor_inline(schedule), parse_mode="HTML")
+    """
+    return (
+        "<b>근무 일정 설정</b>\n\n"
+        "<pre>📅 근무요일      ⏰ 근무시간</pre>\n"
+        "요일을 눌러 켜고/끄고, 시간을 선택하세요:"
+    )
 
 # 4. Kunlik so'rov uchun: mavjud belgilangan ma'lumotni tasdiqlash
 def daily_confirm_inline(workplace_id, work_date):
@@ -153,29 +180,25 @@ def edit_days_inline(workplace_id):
 
     return builder.as_markup()
 
-# 6. Soatlarni tanlash - 휴무 bilan
+# 6. Soatlarni tanlash - KVADRAT GRID, "시간" so'zisiz
 def select_hours_inline(day, workplace_id):
-    """Soat variantlari va dam olish kuni"""
+    """Soat variantlari va dam olish kuni - 2 ustunli kvadrat grid"""
     builder = InlineKeyboardBuilder()
 
-    builder.row(InlineKeyboardButton(text="🏖 휴무", callback_data=f"save_{workplace_id}_{day}_0"))
+    builder.button(text="🏖 휴무", callback_data=f"save_{workplace_id}_{day}_0")
 
     standard_hours = [10, 10.5, 11]
     for hours in standard_hours:
         builder.button(
-            text=f"{hours}시간", 
+            text=f"{hours}",
             callback_data=f"save_{workplace_id}_{day}_{hours}"
         )
 
-    builder.adjust(3)
+    builder.button(text="⌨️ 직접 입력", callback_data=f"manual_edit_{workplace_id}_{day}")
+    builder.button(text="🔄 기록 삭제", callback_data=f"clear_{workplace_id}_{day}")
 
-    builder.row(
-        InlineKeyboardButton(text="⌨️ 직접 입력", callback_data=f"manual_edit_{workplace_id}_{day}")
-    )
-
-    builder.row(
-        InlineKeyboardButton(text="🔄 기록 삭제", callback_data=f"clear_{workplace_id}_{day}")
-    )
+    # 2 ustunli kvadrat grid: [휴무][10] / [10.5][11] / [⌨️][🔄]
+    builder.adjust(2, 2, 2)
 
     builder.row(
         InlineKeyboardButton(text="⬅️ 뒤로", callback_data=f"edit_logs_{workplace_id}")
@@ -188,20 +211,18 @@ def daily_report_inline():
     """Har kuni 05:00 da so'raladigan inline menu"""
     builder = InlineKeyboardBuilder()
 
-    builder.row(InlineKeyboardButton(text="🏖 휴무", callback_data="daily_report_0"))
+    builder.button(text="🏖 휴무", callback_data="daily_report_0")
 
     standard_hours = [10, 10.5, 11]
     for hours in standard_hours:
         builder.button(
-            text=f"{hours}시간", 
+            text=f"{hours}",
             callback_data=f"daily_report_{hours}"
         )
 
-    builder.adjust(3)
+    builder.button(text="⌨️ 직접 입력", callback_data="daily_report_manual")
 
-    builder.row(
-        InlineKeyboardButton(text="⌨️ 직접 입력", callback_data="daily_report_manual")
-    )
+    builder.adjust(2, 2, 1)
 
     return builder.as_markup()
 
