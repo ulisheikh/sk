@@ -4,8 +4,10 @@ import json
 import calendar as cal
 from datetime import datetime
 
-# Baza fayli manzili
-DB_PATH = "database.db"
+# Baza fayli manzili (absolyut yo'l - bot qayerdan ishga tushirilishidan qat'i nazar
+# doim shu bitta faylni ishlatadi: src/database.db)
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "database.db")
+DB_PATH = os.path.normpath(DB_PATH)
 
 # ADMIN USER ID - BU YERGA O'Z TELEGRAM ID INGIZNI KIRITING!
 ADMIN_USER_ID = 5830567800  # <-- BU YERGA O'ZGARTIRING!
