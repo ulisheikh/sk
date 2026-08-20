@@ -8,6 +8,7 @@ import calendar
 from datetime import datetime
 from src.database import db
 from src.keyboards import kbd, kbd_admin
+from src.utils.state_filters import is_free_text
 
 admin_router = Router()
 
@@ -23,24 +24,26 @@ def get_weekday_korean(date_obj):
 
 # --- MAXFIY ADMIN KOMANDA ---
 @admin_router.message(F.text == "/my_users")
-async def admin_panel(message: Message):
+async def admin_panel(message: Message, state: FSMContext):
     """Maxfiy admin panel - faqat admin ko'radi"""
     if not db.is_admin(message.from_user.id):
         # Oddiy foydalanuvchi uchun xech narsa ko'rsatilmaydi
         return
 
+    await state.clear()
     await message.answer(
         "🔐 관리자 패널\n\n선택하세요:",
         reply_markup=kbd_admin.admin_main_menu()
     )
 
 @admin_router.callback_query(F.data == "admin_panel")
-async def show_admin_panel(callback: CallbackQuery):
+async def show_admin_panel(callback: CallbackQuery, state: FSMContext):
     """Admin panelga qaytish"""
     if not db.is_admin(callback.from_user.id):
         await callback.answer("❌ 권한이 없습니다.")
         return
 
+    await state.clear()
     await callback.message.edit_text(
         "🔐 관리자 패널\n\n선택하세요:",
         reply_markup=kbd_admin.admin_main_menu()
@@ -383,7 +386,7 @@ async def admin_edit_rate(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("💰 새로운 시급을 입력하세요 (예: 12500):")
     await state.set_state(AdminForm.admin_edit_rate)
 
-@admin_router.message(AdminForm.admin_edit_rate)
+@admin_router.message(AdminForm.admin_edit_rate, is_free_text)
 async def process_admin_rate(message: Message, state: FSMContext):
     if not db.is_admin(message.from_user.id):
         return
@@ -425,7 +428,7 @@ async def admin_edit_tax(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("📉 새로운 세금율을 입력하세요 (예: 3.3):")
     await state.set_state(AdminForm.admin_edit_tax)
 
-@admin_router.message(AdminForm.admin_edit_tax)
+@admin_router.message(AdminForm.admin_edit_tax, is_free_text)
 async def process_admin_tax(message: Message, state: FSMContext):
     if not db.is_admin(message.from_user.id):
         return

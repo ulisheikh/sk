@@ -22,7 +22,8 @@ async def set_bot_commands(bot: Bot):
     """Chap menyu commandalar"""
     commands = [
         BotCommand(command="start", description="🏠 메인 메뉴"),
-        BotCommand(command="info", description="👤 프로필")
+        BotCommand(command="info", description="👤 프로필"),
+        BotCommand(command="monthly", description="📅 월별 전체 보기")
     ]
     await bot.set_my_commands(commands)
 

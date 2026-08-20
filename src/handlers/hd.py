@@ -8,6 +8,7 @@ import calendar
 from datetime import datetime, timedelta
 from src.database import db
 from src.keyboards import kbd
+from src.utils.state_filters import is_free_text
 
 router = Router()
 
@@ -36,8 +37,9 @@ def get_weekday_korean(date_obj):
 
 # --- START ---
 @router.message(F.text == "/start")
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, state: FSMContext):
     user_id = message.from_user.id
+    await state.clear()
     await db.update_user_info(user_id, message.from_user.full_name, message.from_user.username)
 
     if not await db.is_user_active(user_id):
@@ -54,8 +56,9 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
 
 # --- SOZLAMALAR (프로필) ---
 @router.callback_query(F.data == "settings")
-async def show_settings(callback: CallbackQuery):
+async def show_settings(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    await state.clear()
     user_id = callback.from_user.id
     name, hourly_rate, tax_rate, work_days = await db.get_user_full_info(user_id)
 
@@ -77,7 +80,7 @@ async def edit_rate_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("💰 새로운 시급을 입력하세요 (예: 12500):")
     await state.set_state(Form.edit_rate)
 
-@router.message(Form.edit_rate)
+@router.message(Form.edit_rate, is_free_text)
 async def process_edit_rate(message: Message, state: FSMContext):
     try:
         new_rate = float(message.text.replace(',', '').replace('원', '').strip())
@@ -98,7 +101,7 @@ async def edit_tax_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("📉 새로운 세금율을 입력하세요 (예: 3.3):")
     await state.set_state(Form.edit_tax)
 
-@router.message(Form.edit_tax)
+@router.message(Form.edit_tax, is_free_text)
 async def process_edit_tax(message: Message, state: FSMContext):
     try:
         new_tax = float(message.text.replace(',', '.').replace('%', '').strip())
@@ -117,6 +120,7 @@ async def process_edit_tax(message: Message, state: FSMContext):
 @router.callback_query(F.data == "edit_workdays")
 async def edit_workdays_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    await state.clear()
     user_id = callback.from_user.id
 
     schedule = await db.get_user_schedule(user_id)
@@ -131,7 +135,7 @@ async def edit_workdays_start(callback: CallbackQuery, state: FSMContext):
 
     await safe_edit_or_answer(
         callback,
-        "📅 근무하는 요일과 근무시간을 선택하세요:\n\n요일을 눌러 켜고/끄고, 켜진 요일 아래에서 근무 시간을 선택하세요.",
+        "📅 근무하는 요일과 근무시간을 선택하세요:\n\n요일을 눌러 켜고/끄고, 켜진 요일 옆에서 근무 시간을 선택하세요.",
         reply_markup=kbd.schedule_editor_inline(schedule)
     )
 
@@ -180,7 +184,7 @@ async def wd_manual_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(f"⌨️ {day}요일 근무 시간을 입력하세요 (예: 9.5):")
     await state.set_state(Form.edit_schedule_manual)
 
-@router.message(Form.edit_schedule_manual)
+@router.message(Form.edit_schedule_manual, is_free_text)
 async def wd_manual_process(message: Message, state: FSMContext):
     try:
         hours = float(message.text.replace(',', '.'))
@@ -234,8 +238,9 @@ async def wd_save(callback: CallbackQuery, state: FSMContext):
 
 # --- TAHRIRLASH (근무표 수정) - o'zgarishsiz, mustaqil ishlaydi ---
 @router.callback_query(F.data == "edit_logs")
-async def show_edit_logs(callback: CallbackQuery):
+async def show_edit_logs(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    await state.clear()
     user_id = callback.from_user.id
     workplaces = await db.get_user_workplaces(user_id)
 
@@ -377,7 +382,7 @@ async def manual_input_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(f"⌨️ {day}일 근무 시간을 입력해주세요 (예: 9.5):")
     await state.set_state(Form.edit_manual_workplace_day)
 
-@router.message(Form.edit_manual_workplace_day)
+@router.message(Form.edit_manual_workplace_day, is_free_text)
 async def process_manual_input(message: Message, state: FSMContext):
     try:
         data = await state.get_data()
@@ -516,7 +521,7 @@ async def process_daily_report(callback: CallbackQuery, state: FSMContext):
             reply_markup=kbd.main_menu_inline()
         )
 
-@router.message(Form.daily_manual_input)
+@router.message(Form.daily_manual_input, is_free_text)
 async def process_daily_manual(message: Message, state: FSMContext):
     try:
         hours = float(message.text.replace(',', '.'))
@@ -571,8 +576,9 @@ async def daily_change(callback: CallbackQuery):
     )
 
 @router.message(F.text.in_(["/info", "프로필", "내 정보"]))
-async def user_info(message: Message):
+async def user_info(message: Message, state: FSMContext):
     user_id = message.from_user.id
+    await state.clear()
     username = message.from_user.username or "없음"
     full_name = message.from_user.full_name
     name, hourly_rate, tax_rate, work_days = await db.get_user_full_info(user_id)

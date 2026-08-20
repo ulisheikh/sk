@@ -6,6 +6,7 @@ from datetime import datetime
 import calendar
 from src.database import db
 from src.keyboards import kbd
+from src.utils.state_filters import is_free_text
 from aiogram.types import BufferedInputFile
 from src.utils.image_generator import create_calendar_image
 import asyncio
@@ -39,8 +40,9 @@ async def delete_message_after(bot, chat_id, message_id, seconds):
 
 # /start command
 @router.message(F.text == "/start")
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, state: FSMContext):
     user_id = message.from_user.id
+    await state.clear()
 
     await db.update_user_info(
         user_id,
@@ -70,8 +72,9 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
 
 # 내 근무표 - ISHXONALAR RO'YXATI (yoki 1 ta bo'lsa to'g'ridan-to'g'ri hisobot)
 @router.callback_query(F.data == "my_workplaces")
-async def show_workplaces_list(callback: CallbackQuery):
+async def show_workplaces_list(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    await state.clear()
     user_id = callback.from_user.id
 
     workplaces = await db.get_user_workplaces(user_id)
@@ -151,7 +154,7 @@ async def add_workplace_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("🏢 새 직장 이름을 입력하세요:")
     await state.set_state(AddWorkplaceForm.name)
 
-@router.message(AddWorkplaceForm.name)
+@router.message(AddWorkplaceForm.name, is_free_text)
 async def add_workplace_finish(message: Message, state: FSMContext):
     user_id = message.from_user.id
     name = message.text.strip()
@@ -263,18 +266,18 @@ async def select_month_for_workplace(callback: CallbackQuery):
 async def show_full_monthly_summary(callback: CallbackQuery, workplace_id: int):
     """Barcha oylarning umumiy hisobotini bitta chiroyli matnli xabarda ko'rsatish"""
     user_id = callback.from_user.id
+    text = await build_full_monthly_text(user_id, workplace_id)
+    await safe_edit_or_answer(callback, text, reply_markup=kbd.back_to_main_inline())
+
+async def build_full_monthly_text(user_id: int, workplace_id: int) -> str:
+    """Berilgan ishxona bo'yicha barcha oylar hisobotini matn shaklida qaytaradi"""
     workplace_name = await db.get_workplace_name(workplace_id)
     hourly_rate, tax_rate = await db.get_user_settings(user_id)
 
     summaries = await db.get_all_monthly_summaries(user_id, workplace_id)
 
     if not summaries:
-        await safe_edit_or_answer(
-            callback,
-            f"🏢 {workplace_name}\n\n📭 근무 기록이 없습니다.",
-            reply_markup=kbd.back_to_main_inline()
-        )
-        return
+        return f"🏢 {workplace_name}\n\n📭 근무 기록이 없습니다."
 
     lines = [f"🏢 {workplace_name}", "📊 전체 근무 내역", "━━━━━━━━━━━━━━━━━━━━"]
 
@@ -305,4 +308,22 @@ async def show_full_monthly_summary(callback: CallbackQuery, workplace_id: int):
     if len(text) > 4000:
         text = text[:3950] + "\n\n… (내역이 많아 일부만 표시됩니다)"
 
-    await safe_edit_or_answer(callback, text, reply_markup=kbd.back_to_main_inline())
+    return text
+
+# YANGI: /monthly komandasi orqali (chap menyu / matn buyrug'i) kirish
+@router.message(F.text.in_(["/monthly", "월별 전체 보기"]))
+async def monthly_overview_command(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    await state.clear()
+    workplaces = await db.get_user_workplaces(user_id)
+
+    if not workplaces:
+        await message.answer("🏢 직장이 없습니다.", reply_markup=kbd.back_to_main_inline())
+        return
+
+    if len(workplaces) == 1:
+        text = await build_full_monthly_text(user_id, workplaces[0][0])
+        await message.answer(text, reply_markup=kbd.back_to_main_inline())
+        return
+
+    await message.answer("🏢 직장을 선택하세요:", reply_markup=kbd.workplaces_for_monthly_inline(workplaces))
