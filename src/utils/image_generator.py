@@ -115,9 +115,9 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
 
         if hours is not None:
             if has_note:
-                # Eslatma bor - kun holatidan qat'i nazar qizil rangda ajratib ko'rsatamiz
-                color = (255, 190, 190)
-                outline = (200, 60, 60)
+                # Eslatma bor - qizil (휴무) bilan aralashmasligi uchun yorqin sariq rangda ajratib ko'rsatamiz
+                color = (255, 235, 59)
+                outline = (245, 190, 0)
             elif hours > 0:
                 color = (200, 255, 200)
                 outline = (100, 200, 100)
@@ -136,7 +136,7 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
             txt = "휴무" if hours == 0 else f"{hours}시간"
             fnt = font_text if hours == 0 else font_small
             if has_note:
-                clr = (139, 0, 0)
+                clr = (140, 90, 0)
             elif hours == 0:
                 clr = (255, 0, 0)
             else:
@@ -147,7 +147,7 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
         # Shu kunga eslatma qoldirilgan bo'lsa - katakcha burchagiga oq "!" belgisi qo'yamiz
         if has_note:
             mark_cx, mark_cy = box_x2 - 14, box_y1 + 14
-            draw.ellipse([(mark_cx - 12, mark_cy - 12), (mark_cx + 12, mark_cy + 12)], fill=(180, 0, 0))
+            draw.ellipse([(mark_cx - 12, mark_cy - 12), (mark_cx + 12, mark_cy + 12)], fill=(230, 81, 0))
             mbbox = draw.textbbox((0, 0), "!", font=font_mark)
             mw = mbbox[2] - mbbox[0]
             mh = mbbox[3] - mbbox[1]
