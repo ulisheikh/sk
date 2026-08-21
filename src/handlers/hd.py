@@ -452,8 +452,9 @@ async def manual_input_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         f"⌨️ {day}일 근무 시간을 입력해주세요.\n\n"
         f"예: 9.5\n"
-        f"또는 짧은 메모와 함께: \"9시간 근무, 급여는 미리 받음\"\n"
-        f"(문장 속 숫자를 시간으로 인식하고, 나머지 내용은 메모로 저장됩니다)"
+        f"또는 짧은 메모와 함께: 9시간 근무, 급여는 미리 받음\n"
+        f"(따옴표 없이 그대로 입력하세요. 문장 속 숫자를 시간으로 인식하고, 나머지 내용은 메모로 저장됩니다)\n\n"
+        f"💡 이미 이 날짜에 시간이 기록되어 있다면, 숫자 없이 메모만 입력해도 됩니다 (예: 급여는 미리 받음). 기존 시간은 그대로 유지됩니다."
     )
     await state.set_state(Form.edit_manual_workplace_day)
 
@@ -461,19 +462,25 @@ async def manual_input_start(callback: CallbackQuery, state: FSMContext):
 async def process_manual_input(message: Message, state: FSMContext):
     hours, note = parse_hours_and_note(message.text)
 
-    if hours is None:
-        await message.answer("❌ 시간을 숫자로 포함해서 입력해주세요 (예: 9 또는 \"9시간, 급여는 미리 받음\").")
-        return
-
-    if hours < 0 or hours > 24:
-        await message.answer("❌ 0-24 사이의 시간을 입력해주세요.")
-        return
-
     data = await state.get_data()
     workplace_id = data.get("workplace_id")
     day = data.get("editing_day")
     user_id = message.from_user.id
     work_date = datetime.now().strftime(f"%Y-%m-{int(day):02d}")
+
+    if hours is None:
+        # Raqam kiritilmagan - agar shu kunga avvaldan soat yozilgan bo'lsa,
+        # uni o'zgartirmasdan faqat matnni memo sifatida saqlaymiz
+        existing_hours = await db.get_log_hours(user_id, workplace_id, work_date)
+        if existing_hours is None:
+            await message.answer("❌ 시간을 숫자로 포함해서 입력해주세요 (예: 9 또는 9시간, 급여는 미리 받음).")
+            return
+        hours = existing_hours
+        note = message.text.strip()
+
+    if hours < 0 or hours > 24:
+        await message.answer("❌ 0-24 사이의 시간을 입력해주세요.")
+        return
 
     await db.save_work_log_with_workplace(user_id, workplace_id, work_date, hours, note or '')
 
@@ -569,7 +576,9 @@ async def process_daily_report(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer(
             "⌨️ 오늘 근무 시간을 입력해주세요.\n\n"
             "예: 10.5\n"
-            "또는 짧은 메모와 함께: \"9시간 근무, 급여는 미리 받음\""
+            "또는 짧은 메모와 함께: 9시간 근무, 급여는 미리 받음\n"
+            "(따옴표 없이 그대로 입력하세요)\n\n"
+            "💡 오늘 시간이 이미 기록되어 있다면, 숫자 없이 메모만 입력해도 됩니다. 기존 시간은 그대로 유지됩니다."
         )
         await state.set_state(Form.daily_manual_input)
         return
@@ -606,14 +615,6 @@ async def process_daily_report(callback: CallbackQuery, state: FSMContext):
 async def process_daily_manual(message: Message, state: FSMContext):
     hours, note = parse_hours_and_note(message.text)
 
-    if hours is None:
-        await message.answer("❌ 시간을 숫자로 포함해서 입력해주세요 (예: 10.5 또는 \"9시간, 급여는 미리 받음\").")
-        return
-
-    if hours < 0 or hours > 24:
-        await message.answer("❌ 0-24 사이의 시간을 입력해주세요.")
-        return
-
     user_id = message.from_user.id
 
     from datetime import datetime as dt
@@ -625,6 +626,20 @@ async def process_daily_manual(message: Message, state: FSMContext):
 
     workplaces = await db.get_user_workplaces(user_id)
     workplace_id = workplaces[0][0] if workplaces else 1
+
+    if hours is None:
+        # Raqam kiritilmagan - agar bugungi kunga avvaldan soat yozilgan bo'lsa,
+        # uni o'zgartirmasdan faqat matnni memo sifatida saqlaymiz
+        existing_hours = await db.get_log_hours(user_id, workplace_id, work_date)
+        if existing_hours is None:
+            await message.answer("❌ 시간을 숫자로 포함해서 입력해주세요 (예: 10.5 또는 9시간, 급여는 미리 받음).")
+            return
+        hours = existing_hours
+        note = message.text.strip()
+
+    if hours < 0 or hours > 24:
+        await message.answer("❌ 0-24 사이의 시간을 입력해주세요.")
+        return
 
     await db.save_work_log_with_workplace(user_id, workplace_id, work_date, hours, note or '')
 
