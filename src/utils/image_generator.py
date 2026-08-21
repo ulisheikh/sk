@@ -8,9 +8,12 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
     """Kalendar rasmini yaratish (Ism ishxona bilan bir qatorda, o'ngda)
 
     notes_dict: {"YYYY-MM-DD": "erkin matn eslatma"} - foydalanuvchi soatni qo'lda
-    kiritganda qoldirgan qo'shimcha matnlari (masalan "9시간, 급여는 미리 받음").
-    Eslatma endi pastda alohida bo'lim sifatida emas, balki O'SHA KUNNING
-    katakchasida, soat matni o'rniga (kichik shrift bilan, 2 qatorgacha) chiqadi.
+    kiritganda qoldirgan qo'shimcha matnlari (masalan "8시간인데 미리 받음").
+
+    - Shu sananing katakchasida soat odatdagidek ko'rsatiladi (hisob-kitobga ta'sir qilmaydi),
+      lekin katakcha QIZIL rangga bo'yaladi va ustida oq "!" belgisi chiqadi - bu shu kun
+      uchun eslatma borligini bildiradi (masalan oldindan pul olingan).
+    - Rasm pastida esa "📝 메모" bo'limida barcha eslatmalar matn shaklida ro'yxat qilinadi.
     """
     notes_dict = notes_dict or {}
 
@@ -21,9 +24,18 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
     first_day = datetime(year, month, 1)
     start_weekday = first_day.weekday()
 
-    # Balandlikni oldindan xavfsiz yuqori chegara bilan hisoblaymiz,
+    # Faqat shu oyga tegishli, bo'sh bo'lmagan eslatmalar
+    active_notes = []
+    for day in range(1, days_in_month + 1):
+        date_str = f"{year}-{month:02d}-{day:02d}"
+        note = notes_dict.get(date_str)
+        if note:
+            active_notes.append((day, note))
+
+    # Xavfsiz yuqori chegara bilan balandlikni oldindan hisoblaymiz,
     # oxirida rasmni haqiqiy ishlatilgan balandlikka crop qilamiz.
-    width, height = 900, 1700
+    extra_height_estimate = 150 + len(active_notes) * 150
+    width, height = 900, 1500 + extra_height_estimate
 
     img = Image.new('RGB', (width, height), color=(240, 248, 255))
     draw = ImageDraw.Draw(img)
@@ -50,14 +62,17 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
             font_name = ImageFont.truetype(font_regular, 26)
             font_text = ImageFont.truetype(font_regular, 28)
             font_small = ImageFont.truetype(font_regular, 20)
-            # Kichik katakcha ichidagi memo matni uchun juda kichik shriftlar
-            font_note_cell = ImageFont.truetype(font_regular, 15)
-            font_note_cell_tiny = ImageFont.truetype(font_regular, 12)
+            font_mark = ImageFont.truetype(font_bold, 22)
+            # Eslatmalar uchun - matn uzunligiga qarab tanlanadigan shriftlar
+            font_note_title = ImageFont.truetype(font_bold, 26)
+            font_note_normal = ImageFont.truetype(font_regular, 20)
+            font_note_small = ImageFont.truetype(font_regular, 17)
+            font_note_tiny = ImageFont.truetype(font_regular, 14)
         else:
             raise FileNotFoundError("Shrift fayllari topilmadi")
     except Exception:
-        font_title = font_header = font_name = font_text = font_small = ImageFont.load_default()
-        font_note_cell = font_note_cell_tiny = ImageFont.load_default()
+        font_title = font_header = font_name = font_text = font_small = font_mark = ImageFont.load_default()
+        font_note_title = font_note_normal = font_note_small = font_note_tiny = ImageFont.load_default()
 
     # Sarlavha qutisi
     draw.rounded_rectangle([(20, 20), (880, 165)], radius=15, fill=(65, 105, 225), outline=(0, 0, 139), width=3)
@@ -85,36 +100,6 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
         x_pos = x_start + i * spacing
         draw.text((x_pos, 195), day, fill=(255, 255, 255), font=font_header)
 
-    def wrap_to_lines(text, font, max_width, max_lines):
-        """Matnni berilgan kenglikka moslab qatorlarga bo'ladi,
-        max_lines dan oshsa oxirgi qatorni '...' bilan qisqartiradi."""
-        words = text.split(' ')
-        lines = []
-        current = ""
-        for w in words:
-            test = (current + " " + w).strip()
-            bbox = draw.textbbox((0, 0), test, font=font)
-            w_width = bbox[2] - bbox[0]
-            if w_width <= max_width or not current:
-                current = test
-            else:
-                lines.append(current)
-                current = w
-        if current:
-            lines.append(current)
-
-        if len(lines) > max_lines:
-            lines = lines[:max_lines]
-            last = lines[-1]
-            while last:
-                bbox = draw.textbbox((0, 0), last + "…", font=font)
-                if bbox[2] - bbox[0] <= max_width or len(last) <= 1:
-                    break
-                last = last[:-1]
-            lines[-1] = last + "…"
-
-        return lines
-
     # Kalendar kunlari mantiqi
     y_pos = 265
     x_pos = x_start + start_weekday * spacing
@@ -123,13 +108,22 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
         date_str = f"{year}-{month:02d}-{day:02d}"
         hours = work_dict.get(date_str, None)
         note = notes_dict.get(date_str)
+        has_note = bool(note)
 
         box_x1, box_y1 = x_pos - 50, y_pos - 10
         box_x2, box_y2 = x_pos + 60, y_pos + 110
 
         if hours is not None:
-            color = (200, 255, 200) if hours > 0 else (255, 200, 200)
-            outline = (100, 200, 100) if hours > 0 else (255, 100, 100)
+            if has_note:
+                # Eslatma bor - kun holatidan qat'i nazar qizil rangda ajratib ko'rsatamiz
+                color = (255, 190, 190)
+                outline = (200, 60, 60)
+            elif hours > 0:
+                color = (200, 255, 200)
+                outline = (100, 200, 100)
+            else:
+                color = (255, 200, 200)
+                outline = (255, 100, 100)
             draw.rounded_rectangle([(box_x1, box_y1), (box_x2, box_y2)], radius=8, fill=color, outline=outline, width=2)
         else:
             draw.rounded_rectangle([(box_x1, box_y1), (box_x2, box_y2)], radius=8, fill=(240, 240, 240), outline=(200, 200, 200), width=1)
@@ -139,23 +133,25 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
         draw.text((x_pos - (bbox[2]-bbox[0])//2 + 5, y_pos + 5), day_text, fill=(0, 0, 0), font=font_text)
 
         if hours is not None:
-            if note:
-                # Memo bor - soat o'rniga memo matnini shu katakchada ko'rsatamiz
-                cell_width = (box_x2 - box_x1) - 10
-                note_lines = wrap_to_lines(note, font_note_cell, cell_width, max_lines=3)
-                ty = y_pos + 48
-                for nline in note_lines:
-                    nbbox = draw.textbbox((0, 0), nline, font=font_note_cell)
-                    draw.text((x_pos - (nbbox[2]-nbbox[0])//2 + 5, ty), nline, fill=(0, 0, 139), font=font_note_cell)
-                    ty += 18
+            txt = "휴무" if hours == 0 else f"{hours}시간"
+            fnt = font_text if hours == 0 else font_small
+            if has_note:
+                clr = (139, 0, 0)
             elif hours == 0:
-                txt = "휴무"
-                t_bbox = draw.textbbox((0, 0), txt, font=font_text)
-                draw.text((x_pos - (t_bbox[2]-t_bbox[0])//2 + 5, y_pos + 55), txt, fill=(255, 0, 0), font=font_text)
+                clr = (255, 0, 0)
             else:
-                txt = f"{hours}시간"
-                t_bbox = draw.textbbox((0, 0), txt, font=font_small)
-                draw.text((x_pos - (t_bbox[2]-t_bbox[0])//2 + 5, y_pos + 55), txt, fill=(0, 100, 0), font=font_small)
+                clr = (0, 100, 0)
+            t_bbox = draw.textbbox((0, 0), txt, font=fnt)
+            draw.text((x_pos - (t_bbox[2]-t_bbox[0])//2 + 5, y_pos + 55), txt, fill=clr, font=fnt)
+
+        # Shu kunga eslatma qoldirilgan bo'lsa - katakcha burchagiga oq "!" belgisi qo'yamiz
+        if has_note:
+            mark_cx, mark_cy = box_x2 - 14, box_y1 + 14
+            draw.ellipse([(mark_cx - 12, mark_cy - 12), (mark_cx + 12, mark_cy + 12)], fill=(180, 0, 0))
+            mbbox = draw.textbbox((0, 0), "!", font=font_mark)
+            mw = mbbox[2] - mbbox[0]
+            mh = mbbox[3] - mbbox[1]
+            draw.text((mark_cx - mw/2 - mbbox[0], mark_cy - mh/2 - mbbox[1]), "!", fill=(255, 255, 255), font=font_mark)
 
         if datetime(year, month, day).weekday() == 6:
             y_pos += 130
@@ -163,15 +159,96 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
         else:
             x_pos += spacing
 
+    # ===== YANGI: "미리 받음" (oldindan olingan) kunlarni aniqlash =====
+    # Memo matnida quyidagi so'zlar bo'lsa - shu kunning puli oldindan olingan deb hisoblanadi
+    ADVANCE_KEYWORDS = ["미리 받", "미리받", "선불", "가불"]
+
+    advance_hours = 0
+    for day in range(1, days_in_month + 1):
+        date_str = f"{year}-{month:02d}-{day:02d}"
+        note = notes_dict.get(date_str)
+        hrs = work_dict.get(date_str)
+        if note and hrs:
+            if any(kw in note for kw in ADVANCE_KEYWORDS):
+                advance_hours += hrs
+
+    has_advance = advance_hours > 0
+    if has_advance:
+        advance_gross = advance_hours * hourly_rate
+        advance_tax = advance_gross * (tax_rate / 100)
+        advance_net = advance_gross - advance_tax
+        remaining_net = net - advance_net
+
     # Summary qismi
+    summary_box_height = 300 if has_advance else 220
     summary_y = y_pos + 130
-    draw.rounded_rectangle([(40, summary_y), (860, summary_y + 220)], radius=15, fill=(255, 250, 205), outline=(255, 215, 0), width=3)
+    draw.rounded_rectangle([(40, summary_y), (860, summary_y + summary_box_height)], radius=15, fill=(255, 250, 205), outline=(255, 215, 0), width=3)
     draw.text((60, summary_y + 20), f"⏱️ 총 근무시간: {total_hours}시간", fill=(0, 0, 0), font=font_header)
     draw.text((60, summary_y + 65), f"💰 세전 급여: {gross:,.0f}원", fill=(0, 0, 0), font=font_text)
     draw.text((60, summary_y + 105), f"📉 세금 ({tax_rate}%): {tax:,.0f}원", fill=(139, 0, 0), font=font_text)
     draw.text((60, summary_y + 155), f"💵 실수령액: {net:,.0f}원", fill=(0, 100, 0), font=font_title)
 
-    cursor_y = summary_y + 220 + 30
+    if has_advance:
+        draw.line([(60, summary_y + 210), (840, summary_y + 210)], fill=(220, 190, 120), width=2)
+        draw.text((60, summary_y + 220), f"➖ 미리 받은 금액 ({advance_hours}시간): {advance_net:,.0f}원", fill=(180, 0, 0), font=font_text)
+        draw.text((60, summary_y + 258), f"✅ 남은 지급액: {remaining_net:,.0f}원", fill=(0, 70, 200), font=font_header)
+
+    cursor_y = summary_y + summary_box_height + 30
+
+    # ===== Eslatmalar bo'limi (agar mavjud bo'lsa) =====
+    if active_notes:
+        total_note_chars = sum(len(n) for _, n in active_notes)
+
+        # Matn qancha uzun bo'lsa - shrift shuncha kichrayadi
+        if total_note_chars > 500:
+            note_font = font_note_tiny
+            line_height = 22
+        elif total_note_chars > 250:
+            note_font = font_note_small
+            line_height = 26
+        else:
+            note_font = font_note_normal
+            line_height = 30
+
+        draw.text((60, cursor_y), "📝 메모", fill=(65, 105, 225), font=font_note_title)
+        cursor_y += 45
+
+        max_text_width = 760
+
+        def wrap_text(text, font, max_width):
+            words = text.split(' ')
+            lines = []
+            current = ""
+            for w in words:
+                test = (current + " " + w).strip()
+                bbox = draw.textbbox((0, 0), test, font=font)
+                w_width = bbox[2] - bbox[0]
+                if w_width <= max_width or not current:
+                    current = test
+                else:
+                    lines.append(current)
+                    current = w
+            if current:
+                lines.append(current)
+            return lines
+
+        for day, note in active_notes:
+            entry_text = f"{day}일: {note}"
+            lines = wrap_text(entry_text, note_font, max_text_width)
+
+            box_top = cursor_y - 6
+            box_height = line_height * len(lines) + 16
+            draw.rounded_rectangle(
+                [(50, box_top), (850, box_top + box_height)],
+                radius=8, fill=(255, 255, 255), outline=(220, 220, 220), width=1
+            )
+
+            ty = cursor_y
+            for line in lines:
+                draw.text((70, ty), line, fill=(40, 40, 40), font=note_font)
+                ty += line_height
+
+            cursor_y = box_top + box_height + 14
 
     # Rasmni haqiqiy ishlatilgan balandlikka moslab kesamiz (ortiqcha bo'sh joy qolmasin)
     final_height = min(cursor_y + 30, height)
