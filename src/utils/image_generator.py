@@ -116,8 +116,8 @@ async def create_calendar_image(workplace_name, month, year, work_dict, total_ho
         if hours is not None:
             if has_note:
                 # Eslatma bor - qizil (휴무) bilan aralashmasligi uchun yorqin sariq rangda ajratib ko'rsatamiz
-                color = (255, 235, 59)
-                outline = (245, 190, 0)
+                color = (255, 255, 0)
+                outline = (230, 200, 0)
             elif hours > 0:
                 color = (200, 255, 200)
                 outline = (100, 200, 100)
